@@ -279,6 +279,7 @@ func (a *Agent) startFirecracker(ctx context.Context) error {
 	// The request context is cancelled after the HTTP response, which would kill Firecracker
 	a.fcProcess = exec.Command(a.config.FirecrackerBin,
 		"--api-sock", a.config.SocketPath,
+		"--level", "Warning", // Suppress info-level API request logs
 	)
 
 	// Create pipes for console I/O
