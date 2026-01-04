@@ -82,6 +82,8 @@ func newSetupCmd() *cobra.Command {
 	var (
 		force      bool
 		skipAssets bool
+		cpus       int
+		memoryMiB  int
 	)
 
 	cmd := &cobra.Command{
@@ -101,20 +103,25 @@ This command will:
   # Force re-setup (reinstall everything)
   fc-macos setup --force
 
+  # Setup with custom VM resources
+  fc-macos setup --cpus 8 --memory 8192
+
   # Setup without downloading kernel/rootfs (use your own)
   fc-macos setup --skip-assets`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSetup(cmd.Context(), force, skipAssets)
+			return runSetup(cmd.Context(), force, skipAssets, cpus, memoryMiB)
 		},
 	}
 
 	cmd.Flags().BoolVar(&force, "force", false, "force re-setup even if already configured")
 	cmd.Flags().BoolVar(&skipAssets, "skip-assets", false, "skip downloading kernel and rootfs")
+	cmd.Flags().IntVar(&cpus, "cpus", 4, "number of CPUs for the Linux VM")
+	cmd.Flags().IntVar(&memoryMiB, "memory", 4096, "memory in MiB for the Linux VM")
 
 	return cmd
 }
 
-func runSetup(ctx context.Context, force, skipAssets bool) error {
+func runSetup(ctx context.Context, force, skipAssets bool, cpus, memoryMiB int) error {
 	tartPath := findTart()
 	if tartPath == "" {
 		return fmt.Errorf("tart not found. Install from: https://github.com/cirruslabs/tart/releases")
@@ -143,8 +150,8 @@ func runSetup(ctx context.Context, force, skipAssets bool) error {
 	}
 
 	// Configure VM
-	logrus.Info("Configuring VM (4 CPUs, 4GB RAM)...")
-	setCmd := exec.CommandContext(ctx, tartPath, "set", vmName, "--cpu", "4", "--memory", "4096")
+	logrus.Infof("Configuring VM (%d CPUs, %d MiB RAM)...", cpus, memoryMiB)
+	setCmd := exec.CommandContext(ctx, tartPath, "set", vmName, "--cpu", fmt.Sprintf("%d", cpus), "--memory", fmt.Sprintf("%d", memoryMiB))
 	if err := setCmd.Run(); err != nil {
 		return fmt.Errorf("failed to configure VM: %w", err)
 	}
@@ -297,8 +304,10 @@ sudo chmod 666 /var/lib/firecracker/rootfs/ubuntu-rw.ext4`, "", 1)
 	fmt.Println()
 	fmt.Println("=== Setup Complete ===")
 	fmt.Println()
-	fmt.Printf("VM Name: %s\n", vmName)
-	fmt.Printf("VM IP:   %s\n", vmIP)
+	fmt.Printf("VM Name:   %s\n", vmName)
+	fmt.Printf("VM IP:     %s\n", vmIP)
+	fmt.Printf("VM CPUs:   %d\n", cpus)
+	fmt.Printf("VM Memory: %d MiB\n", memoryMiB)
 	fmt.Println()
 	fmt.Println("Kernel:  /var/lib/firecracker/kernels/vmlinux")
 	fmt.Println("Rootfs:  /var/lib/firecracker/rootfs/ubuntu-rw.ext4")

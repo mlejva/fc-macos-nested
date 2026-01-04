@@ -176,6 +176,7 @@ To run the microVM in background mode:
 | Command | Description |
 |---------|-------------|
 | `fc-macos setup` | Set up Linux VM with Firecracker |
+| `fc-macos setup --cpus 8 --memory 8192` | Custom CPUs and memory for Linux VM |
 | `fc-macos setup --force` | Force re-setup (recreates VM) |
 | `fc-macos run` | Start microVM with interactive console |
 | `fc-macos run --background` | Start microVM in background |
