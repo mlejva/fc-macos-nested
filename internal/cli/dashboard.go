@@ -156,6 +156,12 @@ func (m dashboardModel) Init() tea.Cmd {
 	)
 }
 
+// Action result messages
+type actionResultMsg struct {
+	action string
+	err    error
+}
+
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -164,7 +170,20 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "r":
-			return m, m.fetchStatus
+			// Force refresh
+			return m, func() tea.Msg {
+				return m.fetchStatus()
+			}
+		case "s":
+			// Stop microVM
+			if m.agent.FirecrackerRunning {
+				return m, m.stopMicroVM
+			}
+		case "S":
+			// Stop Linux VM
+			if m.linuxVM.Running {
+				return m, m.stopLinuxVM
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -174,7 +193,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		return m, tea.Batch(
-			m.fetchStatus,
+			func() tea.Msg { return m.fetchStatus() },
 			tea.Every(2*time.Second, func(t time.Time) tea.Msg {
 				return tickMsg(t)
 			}),
@@ -187,6 +206,13 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.lastUpdate = time.Now()
 		return m, nil
+
+	case actionResultMsg:
+		m.err = msg.err
+		// Refresh status after action
+		return m, func() tea.Msg {
+			return m.fetchStatus()
+		}
 	}
 
 	return m, nil
@@ -398,11 +424,19 @@ func (m dashboardModel) renderFooter() string {
 		parts = append(parts, errStyle.Render(fmt.Sprintf("Error: %v", m.err)))
 	}
 
-	// Help
-	help := fmt.Sprintf("%s refresh  %s quit",
-		keyStyle.Render("r"),
-		keyStyle.Render("q"))
-	parts = append(parts, help)
+	// Help - show available actions
+	var actions []string
+	actions = append(actions, fmt.Sprintf("%s refresh", keyStyle.Render("r")))
+
+	if m.agent.FirecrackerRunning {
+		actions = append(actions, fmt.Sprintf("%s stop microVM", keyStyle.Render("s")))
+	}
+	if m.linuxVM.Running {
+		actions = append(actions, fmt.Sprintf("%s stop VM", keyStyle.Render("S")))
+	}
+	actions = append(actions, fmt.Sprintf("%s quit", keyStyle.Render("q")))
+
+	parts = append(parts, strings.Join(actions, "  "))
 
 	return strings.Join(parts, "  │  ")
 }
@@ -525,4 +559,42 @@ func (m dashboardModel) checkMicroVM(ctx context.Context, vmIP string) microVMSt
 	}
 
 	return status
+}
+
+func (m dashboardModel) stopMicroVM() tea.Msg {
+	if m.linuxVM.IP == "" {
+		return actionResultMsg{action: "stop-microvm", err: fmt.Errorf("VM IP not available")}
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	agentURL := fmt.Sprintf("http://%s:8080", m.linuxVM.IP)
+
+	req, err := http.NewRequest("POST", agentURL+"/agent/stop", nil)
+	if err != nil {
+		return actionResultMsg{action: "stop-microvm", err: err}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return actionResultMsg{action: "stop-microvm", err: err}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return actionResultMsg{action: "stop-microvm", err: fmt.Errorf("failed with status %d", resp.StatusCode)}
+	}
+
+	return actionResultMsg{action: "stop-microvm", err: nil}
+}
+
+func (m dashboardModel) stopLinuxVM() tea.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, m.tartPath, "stop", m.vmName)
+	if err := cmd.Run(); err != nil {
+		return actionResultMsg{action: "stop-vm", err: err}
+	}
+
+	return actionResultMsg{action: "stop-vm", err: nil}
 }
