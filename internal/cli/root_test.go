@@ -93,3 +93,54 @@ func TestBalloonSetRequiresAmount(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 }
+
+// Multi-VM tests
+
+func TestMicroVMListCmdExists(t *testing.T) {
+	cmd := NewRootCmd("test")
+	cmd.SetArgs([]string{"microvm", "list", "--help"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestMicroVMListAliasWorks(t *testing.T) {
+	cmd := NewRootCmd("test")
+	cmd.SetArgs([]string{"microvm", "ls", "--help"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestMicroVMShellRequiresName(t *testing.T) {
+	cmd := NewRootCmd("test")
+	cmd.SetArgs([]string{"microvm", "shell"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "required flag")
+}
+
+func TestMicroVMStopAcceptsNameOrAll(t *testing.T) {
+	cmd := NewRootCmd("test")
+	cmd.SetArgs([]string{"microvm", "stop", "--help"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestRunCmdHasNameFlag(t *testing.T) {
+	cmd := NewRootCmd("test")
+	cmd.SetArgs([]string{"run", "--help"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+}
+
+func TestMicroVMStatusAcceptsNameFlag(t *testing.T) {
+	cmd := NewRootCmd("test")
+	cmd.SetArgs([]string{"microvm", "status", "--help"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+}

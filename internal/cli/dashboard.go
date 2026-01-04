@@ -92,37 +92,46 @@ type vmStatus struct {
 }
 
 type microVMStatus struct {
-	Running   bool
-	VCPUs     int
-	MemoryMiB int
-	PID       int
+	ID          string
+	Name        string
+	Running     bool
+	VCPUs       int
+	MemoryMiB   int
+	PID         int
+	CPUPercent  float64 // CPU usage percentage
+	MemoryUsedM int     // Memory used in MiB
 }
 
 type agentStatus struct {
 	Available          bool
 	FirecrackerRunning bool
-	PID                int
+	TotalVMs           int
+	RunningVMs         int
 }
 
 type dashboardModel struct {
-	linuxVM    vmStatus
-	microVM    microVMStatus
-	agent      agentStatus
-	lastUpdate time.Time
-	err        error
-	width      int
-	height     int
-	tartPath   string
-	vmName     string
-	quitting   bool
+	linuxVM     vmStatus
+	microVMs    []microVMStatus
+	agent       agentStatus
+	lastUpdate  time.Time
+	err         error
+	width       int
+	height      int
+	tartPath    string
+	vmName      string
+	quitting    bool
+	selectedIdx int             // Currently selected microVM
+	listOffset  int             // Scroll offset for long lists
+	maxVisible  int             // Max visible microVMs (5)
+	expandedVMs map[string]bool // Track which VMs have details expanded
 }
 
 type tickMsg time.Time
 type statusUpdateMsg struct {
-	linuxVM vmStatus
-	microVM microVMStatus
-	agent   agentStatus
-	err     error
+	linuxVM  vmStatus
+	microVMs []microVMStatus
+	agent    agentStatus
+	err      error
 }
 type actionResultMsg struct {
 	action string
@@ -147,8 +156,10 @@ func runDashboard(ctx context.Context) error {
 	}
 
 	m := dashboardModel{
-		tartPath: tartPath,
-		vmName:   "fc-macos-linux",
+		tartPath:    tartPath,
+		vmName:      "fc-macos-linux",
+		maxVisible:  5,
+		expandedVMs: make(map[string]bool),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -172,9 +183,37 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "r":
 			return m, func() tea.Msg { return m.fetchStatus() }
+		case "j", "down":
+			// Move selection down
+			if len(m.microVMs) > 0 && m.selectedIdx < len(m.microVMs)-1 {
+				m.selectedIdx++
+				// Adjust scroll offset if needed
+				if m.selectedIdx >= m.listOffset+m.maxVisible {
+					m.listOffset = m.selectedIdx - m.maxVisible + 1
+				}
+			}
+			return m, nil
+		case "k", "up":
+			// Move selection up
+			if m.selectedIdx > 0 {
+				m.selectedIdx--
+				// Adjust scroll offset if needed
+				if m.selectedIdx < m.listOffset {
+					m.listOffset = m.selectedIdx
+				}
+			}
+			return m, nil
+		case "enter", " ":
+			// Toggle details for selected microVM
+			if len(m.microVMs) > 0 && m.selectedIdx < len(m.microVMs) {
+				vmID := m.microVMs[m.selectedIdx].ID
+				m.expandedVMs[vmID] = !m.expandedVMs[vmID]
+			}
+			return m, nil
 		case "s":
-			if m.agent.FirecrackerRunning {
-				return m, m.stopMicroVM
+			// Stop selected microVM
+			if len(m.microVMs) > 0 && m.selectedIdx < len(m.microVMs) {
+				return m, m.stopSelectedMicroVM
 			}
 		case "S":
 			if m.linuxVM.Running {
@@ -195,10 +234,17 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusUpdateMsg:
 		m.linuxVM = msg.linuxVM
-		m.microVM = msg.microVM
+		m.microVMs = msg.microVMs
 		m.agent = msg.agent
 		m.err = msg.err
 		m.lastUpdate = time.Now()
+		// Ensure selection is within bounds
+		if m.selectedIdx >= len(m.microVMs) {
+			m.selectedIdx = len(m.microVMs) - 1
+		}
+		if m.selectedIdx < 0 {
+			m.selectedIdx = 0
+		}
 		return m, nil
 
 	case actionResultMsg:
@@ -223,16 +269,15 @@ func (m dashboardModel) View() string {
 	b.WriteString(labelStyle.Render("FIRECRACKER ON MACOS"))
 	b.WriteString("\n\n")
 
-	// Calculate widths
+	// Calculate widths - use full terminal width
 	availWidth := m.width
 	if availWidth < 60 {
 		availWidth = 80
 	}
 
+	// Use full width for boxes
 	boxWidth := (availWidth - 6) / 2
-	if boxWidth > 40 {
-		boxWidth = 40
-	}
+	fullWidth := availWidth - 4
 
 	// Layout
 	if availWidth >= 85 {
@@ -242,14 +287,14 @@ func (m dashboardModel) View() string {
 		row := lipgloss.JoinHorizontal(lipgloss.Top, vmBox, "  ", agentBox)
 		b.WriteString(row)
 		b.WriteString("\n\n")
-		b.WriteString(m.renderMicroVMBox(boxWidth*2 + 4))
+		b.WriteString(m.renderMicroVMBox(fullWidth))
 	} else {
 		// Stacked
-		b.WriteString(m.renderVMBox(availWidth-4, 0))
+		b.WriteString(m.renderVMBox(fullWidth, 0))
 		b.WriteString("\n")
-		b.WriteString(m.renderAgentBox(availWidth-4, 0))
+		b.WriteString(m.renderAgentBox(fullWidth, 0))
 		b.WriteString("\n")
-		b.WriteString(m.renderMicroVMBox(availWidth - 4))
+		b.WriteString(m.renderMicroVMBox(fullWidth))
 	}
 
 	// Footer
@@ -325,19 +370,17 @@ func (m dashboardModel) renderAgentBox(width int, minLines int) string {
 			valueStyle.Render("ONLINE")))
 		lines = append(lines, "")
 
-		if m.agent.FirecrackerRunning {
+		if m.agent.TotalVMs > 0 {
 			lines = append(lines, fmt.Sprintf("  %s  %s",
 				statusOK.Render("✓"),
 				bracketTextStyle.Render("FIRECRACKER")))
-			if m.agent.PID > 0 {
-				lines = append(lines, fmt.Sprintf("  %s  %s",
-					labelStyle.Render("PID"),
-					valueStyle.Render(fmt.Sprintf("%d", m.agent.PID))))
-			}
+			lines = append(lines, fmt.Sprintf("  %s  %s",
+				labelStyle.Render("VMs"),
+				valueStyle.Render(fmt.Sprintf("%d running / %d total", m.agent.RunningVMs, m.agent.TotalVMs))))
 		} else {
 			lines = append(lines, fmt.Sprintf("  %s  %s",
 				labelStyle.Render("○"),
-				labelStyle.Render("FIRECRACKER")))
+				labelStyle.Render("NO MICROVMS")))
 		}
 	} else {
 		lines = append(lines, fmt.Sprintf("  %s  %s",
@@ -363,49 +406,142 @@ func (m dashboardModel) renderAgentBox(width int, minLines int) string {
 func (m dashboardModel) renderMicroVMBox(width int) string {
 	var lines []string
 
-	lines = append(lines, headerStyle.Render("MICROVM"))
+	// Header with count
+	header := "MICROVMS"
+	if len(m.microVMs) > 0 {
+		running := 0
+		for _, vm := range m.microVMs {
+			if vm.Running {
+				running++
+			}
+		}
+		header = fmt.Sprintf("MICROVMS  %s",
+			labelStyle.Render(fmt.Sprintf("(%d/%d running)", running, len(m.microVMs))))
+	}
+	lines = append(lines, headerStyle.Render(header))
 	lines = append(lines, "")
 
-	if !m.agent.FirecrackerRunning {
+	if len(m.microVMs) == 0 {
 		lines = append(lines, fmt.Sprintf("  %s  %s",
 			labelStyle.Render("○"),
-			labelStyle.Render("NOT RUNNING")))
+			labelStyle.Render("NO MICROVMS")))
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("  run 'fc-macos run' to start"))
 
 		return boxStyle.Width(width).Render(strings.Join(lines, "\n"))
 	}
 
-	lines = append(lines, fmt.Sprintf("  %s  %s",
-		statusOK.Render("✓"),
-		valueStyle.Render("RUNNING")))
-	lines = append(lines, "")
+	// Column headers (6 spaces = 2 selector + 1 expand + 1 space + 1 status icon + 1 space)
+	colHeader := fmt.Sprintf("      %-12s %-10s %-6s %-8s",
+		"NAME", "STATUS", "VCPUS", "MEMORY")
+	lines = append(lines, labelStyle.Render(colHeader))
+	lines = append(lines, labelStyle.Render("  "+strings.Repeat("─", width-8)))
 
-	// Resources in bracket style
-	vcpuLabel := fmt.Sprintf("[ VCPUS: %d ]", m.microVM.VCPUs)
-	memLabel := fmt.Sprintf("[ MEMORY: %d MiB ]", m.microVM.MemoryMiB)
-
-	lines = append(lines, fmt.Sprintf("  %s  %s",
-		bracketStyle.Render(vcpuLabel),
-		bracketStyle.Render(memLabel)))
-	lines = append(lines, "")
-
-	// Resource bars
-	barWidth := width - 16
-	if barWidth < 20 {
-		barWidth = 20
-	}
-	if barWidth > 50 {
-		barWidth = 50
+	// Determine visible range
+	endIdx := m.listOffset + m.maxVisible
+	if endIdx > len(m.microVMs) {
+		endIdx = len(m.microVMs)
 	}
 
-	vcpuPct := m.microVM.VCPUs * 100 / 8
-	memPct := m.microVM.MemoryMiB * 100 / 4096
+	// Show scroll indicator at top
+	if m.listOffset > 0 {
+		lines = append(lines, labelStyle.Render("  ▲ more above"))
+	}
 
-	lines = append(lines, m.renderMeter("VCPU", vcpuPct, fmt.Sprintf("%d/8", m.microVM.VCPUs), barWidth))
-	lines = append(lines, m.renderMeter("MEM", memPct, fmt.Sprintf("%d/4096", m.microVM.MemoryMiB), barWidth))
+	// Render visible VMs
+	for i := m.listOffset; i < endIdx; i++ {
+		vm := m.microVMs[i]
+		isSelected := i == m.selectedIdx
+		isExpanded := m.expandedVMs[vm.ID]
 
-	return activeBoxStyle.Width(width).Render(strings.Join(lines, "\n"))
+		// Selection indicator
+		selector := "  "
+		if isSelected {
+			selector = statusOK.Render("> ")
+		}
+
+		// Expand/collapse indicator
+		expandIcon := "▸"
+		if isExpanded {
+			expandIcon = "▾"
+		}
+
+		// Status indicator and text
+		var statusText string
+		statusIcon := labelStyle.Render("○")
+		if vm.Running {
+			statusText = "running"
+			statusIcon = statusOK.Render("●")
+		} else {
+			statusText = "stopped"
+		}
+
+		// Name (truncate if needed)
+		name := vm.Name
+		if len(name) > 12 {
+			name = name[:10] + ".."
+		}
+
+		// Format the row
+		var row string
+		if isSelected {
+			row = fmt.Sprintf("%s%s %s %s %-10s %-6d %-8d",
+				selector, labelStyle.Render(expandIcon), statusIcon,
+				valueStyle.Width(12).Render(name),
+				statusText, vm.VCPUs, vm.MemoryMiB)
+			lines = append(lines, valueStyle.Render(row))
+		} else {
+			row = fmt.Sprintf("%s%s %s %-12s %-10s %-6d %-8d",
+				selector, labelStyle.Render(expandIcon), statusIcon, name, statusText, vm.VCPUs, vm.MemoryMiB)
+			lines = append(lines, row)
+		}
+
+		// Show expanded details
+		if isExpanded {
+			detailIndent := "      "
+			if vm.PID > 0 {
+				lines = append(lines, fmt.Sprintf("%s%s %s",
+					detailIndent,
+					labelStyle.Render("PID:"),
+					valueStyle.Render(fmt.Sprintf("%d", vm.PID))))
+			}
+			if vm.ID != "" {
+				idDisplay := vm.ID
+				if len(idDisplay) > 40 {
+					idDisplay = idDisplay[:38] + ".."
+				}
+				lines = append(lines, fmt.Sprintf("%s%s %s",
+					detailIndent,
+					labelStyle.Render("ID: "),
+					valueStyle.Render(idDisplay)))
+			}
+			// Show resource usage
+			if vm.Running {
+				cpuStr := fmt.Sprintf("%.1f%%", vm.CPUPercent)
+				memStr := fmt.Sprintf("%d MB / %d MB", vm.MemoryUsedM, vm.MemoryMiB)
+				lines = append(lines, fmt.Sprintf("%s%s %s    %s %s",
+					detailIndent,
+					labelStyle.Render("CPU:"),
+					valueStyle.Render(cpuStr),
+					labelStyle.Render("RAM:"),
+					valueStyle.Render(memStr)))
+			}
+			lines = append(lines, "") // Empty line after details
+		}
+	}
+
+	// Show scroll indicator at bottom
+	if endIdx < len(m.microVMs) {
+		lines = append(lines, labelStyle.Render("  ▼ more below"))
+	}
+
+	// Determine box style
+	style := boxStyle
+	if len(m.microVMs) > 0 {
+		style = activeBoxStyle
+	}
+
+	return style.Width(width).Render(strings.Join(lines, "\n"))
 }
 
 func (m dashboardModel) renderMeter(label string, pct int, suffix string, width int) string {
@@ -453,12 +589,16 @@ func (m dashboardModel) renderFooter() string {
 
 	// Commands
 	var cmds []string
+	if len(m.microVMs) > 0 {
+		cmds = append(cmds, fmt.Sprintf("%s/%s nav", keyStyle.Render("j"), keyStyle.Render("k")))
+		cmds = append(cmds, fmt.Sprintf("%s details", keyStyle.Render("↵")))
+	}
 	cmds = append(cmds, fmt.Sprintf("%s refresh", keyStyle.Render("r")))
-	if m.agent.FirecrackerRunning {
-		cmds = append(cmds, fmt.Sprintf("%s stop microvm", keyStyle.Render("s")))
+	if len(m.microVMs) > 0 && m.selectedIdx < len(m.microVMs) {
+		cmds = append(cmds, fmt.Sprintf("%s stop vm", keyStyle.Render("s")))
 	}
 	if m.linuxVM.Running {
-		cmds = append(cmds, fmt.Sprintf("%s stop vm", keyStyle.Render("S")))
+		cmds = append(cmds, fmt.Sprintf("%s stop linux", keyStyle.Render("S")))
 	}
 	cmds = append(cmds, fmt.Sprintf("%s quit", keyStyle.Render("q")))
 
@@ -475,10 +615,7 @@ func (m dashboardModel) fetchStatus() tea.Msg {
 	result.linuxVM = m.checkLinuxVM(ctx)
 
 	if result.linuxVM.Running && result.linuxVM.IP != "" {
-		result.agent = m.checkAgent(ctx, result.linuxVM.IP)
-		if result.agent.Available && result.agent.FirecrackerRunning {
-			result.microVM = m.checkMicroVM(ctx, result.linuxVM.IP)
-		}
+		result.agent, result.microVMs = m.checkAgentAndMicroVMs(ctx, result.linuxVM.IP)
 	}
 
 	return result
@@ -528,77 +665,81 @@ func (m dashboardModel) checkLinuxVM(ctx context.Context) vmStatus {
 	return status
 }
 
-func (m dashboardModel) checkAgent(ctx context.Context, vmIP string) agentStatus {
-	status := agentStatus{}
+func (m dashboardModel) checkAgentAndMicroVMs(ctx context.Context, vmIP string) (agentStatus, []microVMStatus) {
+	agent := agentStatus{}
+	var vms []microVMStatus
+
 	client := &http.Client{Timeout: 2 * time.Second}
 	agentURL := fmt.Sprintf("http://%s:8080", vmIP)
 
+	// Check agent health
 	resp, err := client.Get(agentURL + "/health")
 	if err != nil {
-		return status
+		return agent, vms
 	}
 	resp.Body.Close()
-	status.Available = resp.StatusCode == 200
+	agent.Available = resp.StatusCode == 200
 
-	resp, err = client.Get(agentURL + "/agent/status")
+	if !agent.Available {
+		return agent, vms
+	}
+
+	// Fetch microVMs list from new API
+	resp, err = client.Get(agentURL + "/agent/microvms")
 	if err != nil {
-		return status
-	}
-	defer resp.Body.Close()
-
-	var data map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return status
-	}
-
-	if running, ok := data["firecracker_running"].(bool); ok {
-		status.FirecrackerRunning = running
-	}
-	if pid, ok := data["pid"].(float64); ok {
-		status.PID = int(pid)
-	}
-
-	return status
-}
-
-func (m dashboardModel) checkMicroVM(ctx context.Context, vmIP string) microVMStatus {
-	status := microVMStatus{}
-	client := &http.Client{Timeout: 2 * time.Second}
-	agentURL := fmt.Sprintf("http://%s:8080", vmIP)
-
-	resp, err := client.Get(agentURL + "/machine-config")
-	if err != nil {
-		return status
+		return agent, vms
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return status
+		return agent, vms
 	}
 
-	var data map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return status
+	var vmList []MicroVMInfo
+	if err := json.NewDecoder(resp.Body).Decode(&vmList); err != nil {
+		return agent, vms
 	}
 
-	status.Running = true
-	if vcpus, ok := data["vcpu_count"].(float64); ok {
-		status.VCPUs = int(vcpus)
-	}
-	if mem, ok := data["mem_size_mib"].(float64); ok {
-		status.MemoryMiB = int(mem)
-	}
+	// Convert to dashboard status format
+	for _, vm := range vmList {
+		vmStatus := microVMStatus{
+			ID:          vm.ID,
+			Name:        vm.Name,
+			Running:     vm.Running,
+			PID:         vm.PID,
+			CPUPercent:  vm.CPUPercent,
+			MemoryUsedM: vm.MemoryUsedMB,
+		}
+		if vm.Config != nil {
+			vmStatus.VCPUs = vm.Config.VCPUs
+			vmStatus.MemoryMiB = vm.Config.MemoryMiB
+		}
+		vms = append(vms, vmStatus)
 
-	return status
+		if vm.Running {
+			agent.RunningVMs++
+		}
+	}
+	agent.TotalVMs = len(vms)
+	agent.FirecrackerRunning = agent.RunningVMs > 0
+
+	return agent, vms
 }
 
-func (m dashboardModel) stopMicroVM() tea.Msg {
+func (m dashboardModel) stopSelectedMicroVM() tea.Msg {
 	if m.linuxVM.IP == "" {
 		return actionResultMsg{action: "stop-microvm", err: fmt.Errorf("VM IP not available")}
 	}
 
+	if m.selectedIdx >= len(m.microVMs) {
+		return actionResultMsg{action: "stop-microvm", err: fmt.Errorf("no microVM selected")}
+	}
+
+	selectedVM := m.microVMs[m.selectedIdx]
+
 	client := &http.Client{Timeout: 5 * time.Second}
-	req, _ := http.NewRequest("POST", fmt.Sprintf("http://%s:8080/agent/stop", m.linuxVM.IP), nil)
+	url := fmt.Sprintf("http://%s:8080/agent/microvms/%s", m.linuxVM.IP, selectedVM.ID)
+	req, _ := http.NewRequest("DELETE", url, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		return actionResultMsg{action: "stop-microvm", err: err}

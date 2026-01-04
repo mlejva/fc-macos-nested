@@ -19,10 +19,11 @@ import (
 func newMicroVMCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "microvm",
-		Short: "Manage the Firecracker microVM",
-		Long:  `Commands to manage the Firecracker microVM running inside the Linux VM.`,
+		Short: "Manage Firecracker microVMs",
+		Long:  `Commands to manage Firecracker microVMs running inside the Linux VM.`,
 	}
 
+	cmd.AddCommand(newMicroVMListCmd())
 	cmd.AddCommand(newMicroVMStatusCmd())
 	cmd.AddCommand(newMicroVMShellCmd())
 	cmd.AddCommand(newMicroVMStopCmd())
@@ -31,41 +32,71 @@ func newMicroVMCmd() *cobra.Command {
 	return cmd
 }
 
-func newMicroVMStatusCmd() *cobra.Command {
+func newMicroVMListCmd() *cobra.Command {
 	return &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List all microVMs",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return listMicroVMs(cmd.Context())
+		},
+	}
+}
+
+func newMicroVMStatusCmd() *cobra.Command {
+	var name string
+
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show microVM status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return showMicroVMStatus(cmd.Context())
+			return showMicroVMStatus(cmd.Context(), name)
 		},
 	}
+
+	cmd.Flags().StringVar(&name, "name", "", "microVM name or ID (shows all if not specified)")
+
+	return cmd
 }
 
 func newMicroVMShellCmd() *cobra.Command {
-	return &cobra.Command{
+	var name string
+
+	cmd := &cobra.Command{
 		Use:   "shell",
-		Short: "Open interactive shell to the microVM",
-		Long: `Open an interactive shell session to the Firecracker microVM.
+		Short: "Open interactive shell to a microVM",
+		Long: `Open an interactive shell session to a Firecracker microVM.
 
 This connects to the microVM's serial console via the intermediate Linux VM.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return openMicroVMShell(cmd.Context())
+			return openMicroVMShell(cmd.Context(), name)
 		},
 	}
+
+	cmd.Flags().StringVar(&name, "name", "", "microVM name or ID (required)")
+	cmd.MarkFlagRequired("name")
+
+	return cmd
 }
 
 func newMicroVMStopCmd() *cobra.Command {
-	var force bool
+	var (
+		name  string
+		force bool
+		all   bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the microVM",
+		Short: "Stop a microVM",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return stopMicroVM(cmd.Context(), force)
+			return stopMicroVM(cmd.Context(), name, force, all)
 		},
 	}
 
+	cmd.Flags().StringVar(&name, "name", "", "microVM name or ID")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "force stop (kill process)")
+	cmd.Flags().BoolVar(&all, "all", false, "stop all microVMs")
 
 	return cmd
 }
@@ -75,7 +106,7 @@ func newMicroVMLogsCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "logs",
-		Short: "Show microVM logs",
+		Short: "Show fc-agent logs",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return showMicroVMLogs(cmd.Context(), follow)
 		},
@@ -111,7 +142,90 @@ func getVMConnection(ctx context.Context) (string, string, *http.Client, error) 
 	return tartPath, agentURL, client, nil
 }
 
-func showMicroVMStatus(ctx context.Context) error {
+// listMicroVMs lists all microVMs
+func listMicroVMs(ctx context.Context) error {
+	_, agentURL, client, err := getVMConnection(ctx)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Get(agentURL + "/agent/microvms")
+	if err != nil {
+		return fmt.Errorf("failed to list microVMs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var vms []MicroVMInfo
+	if err := json.NewDecoder(resp.Body).Decode(&vms); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(vms) == 0 {
+		fmt.Println("No microVMs running")
+		fmt.Println()
+		fmt.Println("Start a microVM with:")
+		fmt.Println("  fc-macos run --name my-vm")
+		return nil
+	}
+
+	fmt.Printf("%-20s %-18s %-10s %-6s %-10s %s\n", "NAME", "ID", "STATUS", "VCPUS", "MEMORY", "CREATED")
+	fmt.Println(strings.Repeat("-", 85))
+
+	for _, vm := range vms {
+		status := "stopped"
+		if vm.Running {
+			status = "running"
+		}
+		id := vm.ID
+		if len(id) > 15 {
+			id = id[:15] + "..."
+		}
+		vcpus := 0
+		memory := 0
+		if vm.Config != nil {
+			vcpus = vm.Config.VCPUs
+			memory = vm.Config.MemoryMiB
+		}
+		fmt.Printf("%-20s %-18s %-10s %-6d %-10d %s\n",
+			vm.Name, id, status, vcpus, memory,
+			vm.CreatedAt.Format("15:04:05"))
+	}
+
+	fmt.Println()
+	running := 0
+	for _, vm := range vms {
+		if vm.Running {
+			running++
+		}
+	}
+	fmt.Printf("%d microVM(s), %d running\n", len(vms), running)
+
+	return nil
+}
+
+// resolveVMName resolves a name or ID to a full VM ID
+func resolveVMName(ctx context.Context, client *http.Client, agentURL, name string) (string, error) {
+	resp, err := client.Get(agentURL + "/agent/microvms")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var vms []MicroVMInfo
+	if err := json.NewDecoder(resp.Body).Decode(&vms); err != nil {
+		return "", err
+	}
+
+	for _, vm := range vms {
+		if vm.Name == name || vm.ID == name || strings.HasPrefix(vm.ID, name) {
+			return vm.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("microVM not found: %s", name)
+}
+
+func showMicroVMStatus(ctx context.Context, name string) error {
 	tartPath, agentURL, client, err := getVMConnection(ctx)
 	if err != nil {
 		return err
@@ -144,129 +258,143 @@ func showMicroVMStatus(ctx context.Context) error {
 	fmt.Printf("URL:    %s\n", agentURL)
 	fmt.Println()
 
-	// Get machine config
-	resp, err = client.Get(agentURL + "/machine-config")
-	if err == nil && resp.StatusCode == 200 {
-		defer resp.Body.Close()
-		var config map[string]interface{}
-		if json.NewDecoder(resp.Body).Decode(&config) == nil {
-			fmt.Println("=== MicroVM Configuration ===")
-			if vcpus, ok := config["vcpu_count"].(float64); ok {
-				fmt.Printf("vCPUs:  %.0f\n", vcpus)
-			}
-			if memory, ok := config["mem_size_mib"].(float64); ok {
-				fmt.Printf("Memory: %.0f MiB\n", memory)
-			}
-			fmt.Println()
-		}
+	// If no specific VM requested, list all
+	if name == "" {
+		return listMicroVMs(ctx)
 	}
 
-	// Try to get metrics to see if microVM is running
-	resp, err = client.Get(agentURL + "/metrics")
-	if err == nil {
-		defer resp.Body.Close()
-		if resp.StatusCode == 200 {
-			fmt.Println("=== MicroVM Status ===")
-			fmt.Printf("Status: running\n")
-		} else {
-			fmt.Println("=== MicroVM Status ===")
-			fmt.Printf("Status: not started or stopped\n")
-		}
+	// Get specific VM status
+	vmID, err := resolveVMName(ctx, client, agentURL, name)
+	if err != nil {
+		return err
 	}
+
+	resp, err = client.Get(fmt.Sprintf("%s/agent/microvms/%s", agentURL, vmID))
+	if err != nil {
+		return fmt.Errorf("failed to get microVM status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var vm MicroVMInfo
+	if err := json.NewDecoder(resp.Body).Decode(&vm); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	fmt.Printf("=== MicroVM: %s ===\n", vm.Name)
+	fmt.Printf("ID:      %s\n", vm.ID)
+	status := "stopped"
+	if vm.Running {
+		status = "running"
+	}
+	fmt.Printf("Status:  %s\n", status)
+	if vm.PID > 0 {
+		fmt.Printf("PID:     %d\n", vm.PID)
+	}
+	if vm.Config != nil {
+		fmt.Printf("vCPUs:   %d\n", vm.Config.VCPUs)
+		fmt.Printf("Memory:  %d MiB\n", vm.Config.MemoryMiB)
+		fmt.Printf("Kernel:  %s\n", vm.Config.Kernel)
+		fmt.Printf("Rootfs:  %s\n", vm.Config.Rootfs)
+	}
+	fmt.Printf("Created: %s\n", vm.CreatedAt.Format(time.RFC3339))
 
 	return nil
 }
 
-func openMicroVMShell(ctx context.Context) error {
-	tartPath := findTart()
-	if tartPath == "" {
-		return fmt.Errorf("tart not found")
-	}
-
-	vmName := "fc-macos-linux"
-
-	if !isVMRunning(ctx, tartPath, vmName) {
-		return fmt.Errorf("VM is not running. Run 'fc-macos setup' first")
-	}
-
-	// Get VM IP
-	ipCmd := exec.CommandContext(ctx, tartPath, "ip", vmName)
-	output, err := ipCmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to get VM IP: %w", err)
-	}
-	vmIP := strings.TrimSpace(string(output))
-
-	fmt.Println("=== MicroVM Shell ===")
-	fmt.Println()
-	fmt.Println("Connecting to microVM serial console...")
-	fmt.Println("Note: The microVM must be running for the shell to work.")
-	fmt.Println("If no output appears, the microVM may not have a shell on the serial console.")
-	fmt.Println()
-	fmt.Println("Press Ctrl+] to exit the shell.")
-	fmt.Println()
-
-	// Connect to the microVM's serial console via socat
-	// The fc-agent should expose a serial console endpoint
-	// For now, we'll connect via the VM and use socat to the Firecracker socket
-
-	// First, check if the serial console is available
-	client := &http.Client{Timeout: 5 * time.Second}
-	agentURL := fmt.Sprintf("http://%s:8080", vmIP)
-
-	resp, err := client.Get(agentURL + "/health")
-	if err != nil {
-		return fmt.Errorf("fc-agent not responding: %w", err)
-	}
-	resp.Body.Close()
-
-	// Use tart exec to run socat to connect to the Firecracker serial console
-	// The serial console is typically at /tmp/firecracker.socket.serial
-	shellCmd := exec.CommandContext(ctx, tartPath, "exec", vmName, "sh", "-c",
-		"socat -,raw,echo=0 UNIX-CONNECT:/tmp/firecracker.socket.serial 2>/dev/null || echo 'Serial console not available. Is the microVM running?'")
-	shellCmd.Stdin = os.Stdin
-	shellCmd.Stdout = os.Stdout
-	shellCmd.Stderr = os.Stderr
-
-	return shellCmd.Run()
-}
-
-func stopMicroVM(ctx context.Context, force bool) error {
+func openMicroVMShell(ctx context.Context, name string) error {
 	_, agentURL, client, err := getVMConnection(ctx)
 	if err != nil {
 		return err
 	}
 
-	if force {
-		logrus.Info("Force stopping microVM...")
-		// Kill the Firecracker process directly
-		tartPath := findTart()
-		vmName := "fc-macos-linux"
-		killCmd := exec.CommandContext(ctx, tartPath, "exec", vmName, "sudo", "pkill", "-9", "firecracker")
-		killCmd.Run()
-		fmt.Println("MicroVM force stopped")
-		return nil
-	}
-
-	logrus.Info("Stopping microVM gracefully...")
-	req, err := http.NewRequestWithContext(ctx, "PUT", agentURL+"/actions",
-		strings.NewReader(`{"action_type": "SendCtrlAltDel"}`))
+	// Resolve VM name to ID
+	vmID, err := resolveVMName(ctx, client, agentURL, name)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+
+	fmt.Println("=== MicroVM Shell ===")
+	fmt.Printf("Connecting to %s...\n", name)
+	fmt.Println()
+	fmt.Println("Press Ctrl+] to exit the shell.")
+	fmt.Println()
+
+	// Connect to the VM-specific console
+	return connectToVMConsole(ctx, agentURL, vmID)
+}
+
+func stopMicroVM(ctx context.Context, name string, force, all bool) error {
+	_, agentURL, client, err := getVMConnection(ctx)
+	if err != nil {
+		return err
+	}
+
+	if all {
+		// Stop all VMs
+		resp, err := client.Get(agentURL + "/agent/microvms")
+		if err != nil {
+			return fmt.Errorf("failed to list microVMs: %w", err)
+		}
+
+		var vms []MicroVMInfo
+		json.NewDecoder(resp.Body).Decode(&vms)
+		resp.Body.Close()
+
+		if len(vms) == 0 {
+			fmt.Println("No microVMs to stop")
+			return nil
+		}
+
+		for _, vm := range vms {
+			if err := stopSingleVM(ctx, client, agentURL, vm.ID, force); err != nil {
+				logrus.Warnf("Failed to stop %s: %v", vm.Name, err)
+			} else {
+				fmt.Printf("Stopped: %s\n", vm.Name)
+			}
+		}
+		return nil
+	}
+
+	if name == "" {
+		return fmt.Errorf("--name is required (or use --all to stop all microVMs)")
+	}
+
+	// Resolve VM name to ID
+	vmID, err := resolveVMName(ctx, client, agentURL, name)
+	if err != nil {
+		return err
+	}
+
+	if err := stopSingleVM(ctx, client, agentURL, vmID, force); err != nil {
+		return err
+	}
+
+	fmt.Printf("Stopped: %s\n", name)
+	return nil
+}
+
+func stopSingleVM(ctx context.Context, client *http.Client, agentURL, vmID string, force bool) error {
+	url := fmt.Sprintf("%s/agent/microvms/%s", agentURL, vmID)
+	if force {
+		url += "?force=true"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return err
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to stop microVM: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("stop request failed with status %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("stop failed: %s", string(body))
 	}
 
-	fmt.Println("MicroVM stop signal sent")
 	return nil
 }
 

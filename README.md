@@ -132,12 +132,10 @@ Start a Firecracker microVM with an interactive shell:
 ./build/fc-macos run
 ```
 
-Or run with your custom rootfs and boot args:
+Or run with a custom name and configuration:
 
 ```bash
-./build/fc-macos run \
-    --rootfs /var/lib/firecracker/rootfs/alpine-shell.ext4 \
-    --boot-args "console=ttyS0 reboot=k panic=1 pci=off init=/init"
+./build/fc-macos run --name web-server --vcpus 2 --memory 512
 ```
 
 This will:
@@ -148,26 +146,33 @@ This will:
 
 Press `Ctrl+]` to disconnect from the console.
 
-### 6. Run in Background
+### 6. Run Multiple MicroVMs
 
-To run the microVM in background mode:
+fc-macos supports running multiple microVMs simultaneously:
 
 ```bash
-# Start in background
-./build/fc-macos run --background
+# Start multiple microVMs with custom names
+./build/fc-macos run --name web-server --background
+./build/fc-macos run --name database --background
+./build/fc-macos run --name worker-1 --background
 
-# Check status
-./build/fc-macos microvm status
+# List all running microVMs
+./build/fc-macos microvm list
 
-# Connect to shell
-./build/fc-macos microvm shell
+# Check status of a specific microVM
+./build/fc-macos microvm status --name web-server
 
-# View logs
-./build/fc-macos microvm logs
+# Connect to a specific microVM's shell
+./build/fc-macos microvm shell --name database
 
-# Stop the microVM
-./build/fc-macos microvm stop
+# Stop a specific microVM
+./build/fc-macos microvm stop --name worker-1
+
+# Stop all microVMs
+./build/fc-macos microvm stop --all
 ```
+
+If `--name` is not provided, a name is auto-generated (e.g., `microvm-1`).
 
 ## CLI Commands
 
@@ -179,6 +184,7 @@ To run the microVM in background mode:
 | `fc-macos setup --cpus 8 --memory 8192` | Custom CPUs and memory for Linux VM |
 | `fc-macos setup --force` | Force re-setup (recreates VM) |
 | `fc-macos run` | Start microVM with interactive console |
+| `fc-macos run --name NAME` | Start microVM with custom name |
 | `fc-macos run --background` | Start microVM in background |
 | `fc-macos run --vcpus 4 --memory 512` | Custom vCPUs and memory |
 | `fc-macos run --rootfs PATH --boot-args "..."` | Custom rootfs and boot args |
@@ -200,26 +206,34 @@ FC-MACOS   FIRECRACKER ON MACOS
 │   ✓  RUNNING                         │  │   ✓  ONLINE                          │
 │                                      │  │                                      │
 │   NAME  fc-macos-linux               │  │   ✓  FIRECRACKER                     │
-│   IP    192.168.64.5                 │  │                                      │
+│   IP    192.168.64.5                 │  │   VMs  3 running / 3 total           │
 │                                      │  │                                      │
 │   MEM  ████░░░░░░░░░░  320M / 3902M  │  │                                      │
-│   CPU  █████░░░░░░░░░  0.0 / 20      │  │                                      │
+│   CPU  █████░░░░░░░░░  0.5 / 4       │  │                                      │
 ╰──────────────────────────────────────╯  ╰──────────────────────────────────────╯
 
 ╭────────────────────────────────────────────────────────────────────────────────╮
-│ MICROVM                                                                        │
+│ MICROVMS  (3/3 running)                                                        │
 │                                                                                │
-│   ○  NOT RUNNING                                                               │
+│       NAME         STATUS     VCPUS  MEMORY                                    │
+│   ────────────────────────────────────────────                                 │
+│ > ▾ ● web-server   running    2      512                                       │
+│       PID: 1234                                                                │
+│       ID:  vm-1735847123-1                                                     │
+│       CPU: 2.3%    RAM: 128 MB / 512 MB                                        │
 │                                                                                │
-│   run 'fc-macos run' to start                                                  │
+│   ▸ ● database     running    1      256                                       │
+│   ▸ ● worker-1     running    1      128                                       │
 ╰────────────────────────────────────────────────────────────────────────────────╯
 
-18:13:24  │  r refresh  S stop vm  q quit
+18:13:24  │  j/k nav  ↵ details  r refresh  s stop vm  S stop linux  q quit
 ```
 
 **Keyboard shortcuts:**
+- `j`/`k` or `↓`/`↑` - Navigate microVM list
+- `Enter`/`Space` - Toggle details (PID, ID, CPU, RAM usage)
 - `r` - Refresh status
-- `s` - Stop microVM
+- `s` - Stop selected microVM
 - `S` - Stop Linux VM
 - `q` - Quit dashboard
 
@@ -227,11 +241,14 @@ FC-MACOS   FIRECRACKER ON MACOS
 
 | Command | Description |
 |---------|-------------|
-| `fc-macos microvm status` | Check microVM and agent status |
-| `fc-macos microvm shell` | Open interactive shell to microVM |
+| `fc-macos microvm list` | List all running microVMs |
+| `fc-macos microvm status` | Check overall microVM and agent status |
+| `fc-macos microvm status --name NAME` | Check specific microVM status |
+| `fc-macos microvm shell --name NAME` | Open interactive shell to microVM |
 | `fc-macos microvm logs` | View fc-agent logs |
 | `fc-macos microvm logs -f` | Follow fc-agent logs |
-| `fc-macos microvm stop` | Gracefully stop the microVM |
+| `fc-macos microvm stop --name NAME` | Gracefully stop specific microVM |
+| `fc-macos microvm stop --all` | Stop all microVMs |
 | `fc-macos microvm stop --force` | Force stop the microVM |
 
 ### Linux VM Management
@@ -404,9 +421,12 @@ fc-macos-nested/
 - ✅ Nested virtualization (`--nested` flag)
 - ✅ KVM available inside Linux VM (`/dev/kvm`)
 - ✅ Firecracker runs inside Linux VM
+- ✅ **Multiple microVMs running simultaneously**
 - ✅ Interactive shell to microVM via serial console
 - ✅ Interactive shell to Linux VM via tart exec
 - ✅ Full Firecracker API access via CLI
+- ✅ **Live dashboard with j/k navigation and details toggle**
+- ✅ **Real-time CPU and memory monitoring per microVM**
 - ✅ 22 unit tests passing
 - ✅ 20 E2E tests passing
 

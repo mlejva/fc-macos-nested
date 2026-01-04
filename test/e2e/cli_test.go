@@ -186,6 +186,44 @@ func TestMicroVMHelp(t *testing.T) {
 	assert.Contains(t, out, "shell")
 	assert.Contains(t, out, "stop")
 	assert.Contains(t, out, "logs")
+	assert.Contains(t, out, "list")
+}
+
+// TestMicroVMListHelp tests the microvm list command help.
+func TestMicroVMListHelp(t *testing.T) {
+	out, err := runCommand(fcMacosBinary, "microvm", "list", "--help")
+	require.NoError(t, err)
+	assert.Contains(t, out, "list")
+	assert.Contains(t, out, "List all microVMs")
+}
+
+// TestMicroVMListAlias tests that ls alias works.
+func TestMicroVMListAlias(t *testing.T) {
+	out, err := runCommand(fcMacosBinary, "microvm", "ls", "--help")
+	require.NoError(t, err)
+	assert.Contains(t, out, "List all microVMs")
+}
+
+// TestRunNameFlag tests that run command has --name flag.
+func TestRunNameFlag(t *testing.T) {
+	out, err := runCommand(fcMacosBinary, "run", "--help")
+	require.NoError(t, err)
+	assert.Contains(t, out, "--name")
+	assert.Contains(t, out, "auto-generated if not provided")
+}
+
+// TestMicroVMStopAllFlag tests that stop command has --all flag.
+func TestMicroVMStopAllFlag(t *testing.T) {
+	out, err := runCommand(fcMacosBinary, "microvm", "stop", "--help")
+	require.NoError(t, err)
+	assert.Contains(t, out, "--all")
+	assert.Contains(t, out, "stop all microVMs")
+}
+
+// TestMicroVMShellRequiresName tests that shell requires --name.
+func TestMicroVMShellRequiresName(t *testing.T) {
+	_, err := runCommand(fcMacosBinary, "microvm", "shell")
+	require.Error(t, err)
 }
 
 // TestFullWorkflow tests the complete workflow: setup, run, status, stop
@@ -194,32 +232,83 @@ func TestFullWorkflow(t *testing.T) {
 		t.Skip("Skipping full workflow test (set FC_E2E_FULL=1 to run)")
 	}
 
-	// Stop any existing microVM (ignore errors)
-	runCommand(fcMacosBinary, "microvm", "stop", "--force")
+	// Stop any existing microVMs (ignore errors)
+	runCommand(fcMacosBinary, "microvm", "stop", "--all", "--force")
 
 	// Small delay to ensure cleanup
 	time.Sleep(2 * time.Second)
 
-	// Run microVM in background
-	out, err := runCommand(fcMacosBinary, "run", "--background",
+	// Run microVM with a specific name in background
+	out, err := runCommand(fcMacosBinary, "run", "--background", "--name", "test-vm-1",
 		"--rootfs", "/var/lib/firecracker/rootfs/alpine-shell.ext4",
 		"--boot-args", "console=ttyS0 reboot=k panic=1 pci=off init=/init")
 	require.NoError(t, err, "Failed to start microVM: %s", out)
 	assert.Contains(t, out, "MicroVM Started")
+	assert.Contains(t, out, "test-vm-1")
 
 	// Wait for microVM to boot
 	time.Sleep(3 * time.Second)
 
-	// Check status
-	out, err = runCommand(fcMacosBinary, "microvm", "status")
+	// Check status using list
+	out, err = runCommand(fcMacosBinary, "microvm", "list")
 	require.NoError(t, err)
-	assert.Contains(t, out, "fc-agent Status")
-	assert.Contains(t, out, "healthy")
+	assert.Contains(t, out, "test-vm-1")
+	assert.Contains(t, out, "running")
 
-	// Stop microVM (force to ensure it works)
-	out, err = runCommand(fcMacosBinary, "microvm", "stop", "--force")
+	// Check specific VM status
+	out, err = runCommand(fcMacosBinary, "microvm", "status", "--name", "test-vm-1")
 	require.NoError(t, err)
-	assert.Contains(t, out, "stopped")
+	assert.Contains(t, out, "test-vm-1")
+
+	// Stop microVM by name
+	out, err = runCommand(fcMacosBinary, "microvm", "stop", "--name", "test-vm-1", "--force")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Stopped")
+}
+
+// TestMultipleVMs tests running multiple microVMs simultaneously
+func TestMultipleVMs(t *testing.T) {
+	if os.Getenv("FC_E2E_FULL") != "1" {
+		t.Skip("Skipping multi-VM test (set FC_E2E_FULL=1 to run)")
+	}
+
+	// Stop any existing microVMs
+	runCommand(fcMacosBinary, "microvm", "stop", "--all", "--force")
+	time.Sleep(2 * time.Second)
+
+	// Start first microVM
+	out, err := runCommand(fcMacosBinary, "run", "--background", "--name", "multi-vm-1",
+		"--rootfs", "/var/lib/firecracker/rootfs/alpine-shell.ext4",
+		"--boot-args", "console=ttyS0 reboot=k panic=1 pci=off init=/init")
+	require.NoError(t, err, "Failed to start first microVM: %s", out)
+	assert.Contains(t, out, "multi-vm-1")
+
+	// Start second microVM
+	out, err = runCommand(fcMacosBinary, "run", "--background", "--name", "multi-vm-2",
+		"--rootfs", "/var/lib/firecracker/rootfs/alpine-shell.ext4",
+		"--boot-args", "console=ttyS0 reboot=k panic=1 pci=off init=/init")
+	require.NoError(t, err, "Failed to start second microVM: %s", out)
+	assert.Contains(t, out, "multi-vm-2")
+
+	// Wait for VMs to boot
+	time.Sleep(3 * time.Second)
+
+	// List should show both VMs
+	out, err = runCommand(fcMacosBinary, "microvm", "list")
+	require.NoError(t, err)
+	assert.Contains(t, out, "multi-vm-1")
+	assert.Contains(t, out, "multi-vm-2")
+	assert.Contains(t, out, "2 microVM(s)")
+
+	// Stop all VMs
+	out, err = runCommand(fcMacosBinary, "microvm", "stop", "--all", "--force")
+	require.NoError(t, err)
+
+	// Verify all stopped
+	time.Sleep(1 * time.Second)
+	out, err = runCommand(fcMacosBinary, "microvm", "list")
+	require.NoError(t, err)
+	assert.Contains(t, out, "No microVMs running")
 }
 
 func runCommand(name string, args ...string) (string, error) {

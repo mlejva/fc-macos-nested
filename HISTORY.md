@@ -259,6 +259,151 @@ fc-macos run --vcpus 2 --memory 512 --rootfs /path/to/rootfs.ext4
 
 **Lesson Learned:** Hardcoded values are fine for prototyping, but users need control over resources for real workloads.
 
+### Phase 13: Multi-MicroVM Support
+
+**Goal:** Run multiple Firecracker microVMs simultaneously with independent lifecycle management.
+
+**Architecture Changes:**
+
+1. **fc-agent refactor** - Changed from single `fcProcess` to `map[string]*MicroVM`:
+```go
+type Agent struct {
+    microVMs  map[string]*MicroVM  // Keyed by ID
+    vmMu      sync.RWMutex
+    idCounter uint64
+}
+
+type MicroVM struct {
+    ID         string
+    Name       string
+    SocketPath string  // /tmp/firecracker-{id}.socket
+    fcProcess  *exec.Cmd
+    proxy      *httputil.ReverseProxy
+    // ...
+}
+```
+
+2. **New API endpoints:**
+   - `GET /agent/microvms` - List all microVMs
+   - `POST /agent/microvms` - Create new microVM
+   - `GET /agent/microvms/{id}` - Get specific microVM
+   - `DELETE /agent/microvms/{id}` - Stop specific microVM
+   - `GET /agent/microvms/{id}/console` - Console for specific microVM
+
+3. **Per-VM socket paths:** Each microVM gets `/tmp/firecracker-{id}.socket` to avoid conflicts.
+
+4. **Backward compatibility:** Legacy single-VM endpoints (`/agent/start`, `/agent/stop`, `/console`) continue to work.
+
+**CLI Changes:**
+- `fc-macos run --name <name>` - Optional name flag (auto-generates if not provided)
+- `fc-macos microvm list` - New command to list all microVMs
+- `fc-macos microvm stop --name <name>` - Stop specific VM
+- `fc-macos microvm stop --all` - Stop all VMs
+
+### Phase 14: Dashboard Multi-VM List with Navigation
+
+**Challenge:** Display multiple microVMs in the dashboard with vim-like navigation.
+
+**Implementation:**
+```go
+type dashboardModel struct {
+    microVMs    []microVMStatus
+    selectedIdx int             // Currently selected
+    listOffset  int             // Scroll offset
+    maxVisible  int             // Max visible (5)
+    expandedVMs map[string]bool // Track expanded details
+}
+```
+
+**Key bindings added:**
+- `j`/`k` or `↓`/`↑` - Navigate list
+- `Enter`/`Space` - Toggle details expansion
+- `s` - Stop selected microVM
+
+**List ordering issue:** MicroVMs appeared in random order after each refresh because Go maps don't guarantee iteration order.
+
+**Fix:** Sort by name before rendering:
+```go
+sort.Slice(vms, func(i, j int) bool {
+    return vms[i].Name < vms[j].Name
+})
+```
+
+### Phase 15: Real-Time Resource Monitoring for MicroVMs
+
+**Challenge:** Show CPU and RAM usage for each running microVM process.
+
+**First Attempt - Reading /proc files:**
+```go
+// Tried reading /proc/{pid}/stat and /proc/{pid}/status
+// Problem: Complex parsing, required calculating deltas for CPU
+```
+
+**What Didn't Work:** Reading `/proc` files directly required:
+- Parsing complex `/proc/stat` format
+- Tracking previous values to calculate CPU percentage
+- Multiple file reads per process
+
+**Final Solution - Using `ps` command:**
+```go
+func getProcessStats(pid int) (cpuPercent float64, memoryMB int) {
+    cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "%cpu=,rss=")
+    output, err := cmd.Output()
+    if err != nil {
+        return 0, 0
+    }
+    fields := strings.Fields(string(output))
+    if len(fields) >= 2 {
+        cpuPercent, _ = strconv.ParseFloat(fields[0], 64)
+        if rssKB, err := strconv.Atoi(fields[1]); err == nil {
+            memoryMB = rssKB / 1024
+        }
+    }
+    return cpuPercent, memoryMB
+}
+```
+
+**Why `ps` works better:**
+- Single command gives both CPU% and RSS
+- OS handles the CPU calculation
+- No state tracking needed
+- Works consistently across Linux distros
+
+**Lesson Learned:** Sometimes shelling out to a standard tool is simpler and more reliable than reimplementing its logic.
+
+### Phase 16: fc-agent Deployment Challenges
+
+**Problem:** Deploying updated fc-agent binary to the running Linux VM.
+
+**Approach 1 - Stdin piping (failed again):**
+```bash
+cat fc-agent | tart exec vm "cat > /tmp/fc-agent"
+# Result: 0-byte file
+```
+
+**Approach 2 - HTTP transfer (worked):**
+```bash
+# On macOS: Start HTTP server
+python3 -m http.server 8000
+
+# In VM: Download binary
+curl -o /tmp/fc-agent http://host-ip:8000/fc-agent
+```
+
+**systemd service for persistence:**
+```ini
+[Unit]
+Description=Firecracker Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/fc-agent
+Restart=always
+```
+
+**Lesson Learned:** For iterative development, having fc-agent as a systemd service makes deployment much easier - just replace the binary and restart the service.
+
 ## What Worked Well
 
 1. **Tart as VM layer** - Stable, well-maintained, handles all the signing complexity
@@ -266,17 +411,25 @@ fc-macos run --vcpus 2 --memory 512 --rootfs /path/to/rootfs.ext4
 3. **Connection hijacking for console** - Clean way to do bidirectional streaming over HTTP
 4. **Alpine for rootfs** - Minimal, fast to build, easy to customize
 5. **Comprehensive E2E tests** - Caught many issues before manual testing
+6. **Map-based VM registry** - Clean way to manage multiple VMs with unique IDs
+7. **Per-VM Unix sockets** - Avoids socket conflicts between Firecracker instances
+8. **`ps` command for resource stats** - Simple, reliable, no state tracking needed
+9. **Stable list ordering via sort** - Prevents UI flickering from map iteration randomness
+10. **Expandable details in TUI** - Shows details on demand without cluttering the default view
 
 ## What Didn't Work
 
 1. **Code-Hex/vz direct approach** - Killed by macOS security requirements
-2. **Stdin piping via tart exec** - Unreliable for binary data
+2. **Stdin piping via tart exec** - Unreliable for binary data (consistently produces 0-byte files)
 3. **Context-based process management** - Killed Firecracker prematurely
 4. **Ubuntu sample rootfs** - No proper init for serial console
 5. **Serial socket approach** - More complex than stdin/stdout pipes
 6. **Over-designed dashboard** - Per-character gradients, animations everywhere = unreadable
 7. **Dark color palette** - Colors that look good in design tools may be unreadable on actual terminals
 8. **Auto-start on status check** - Polling endpoints shouldn't have side effects
+9. **Reading /proc files for CPU stats** - Complex parsing, required delta calculations, error-prone
+10. **Unsorted map iteration for UI lists** - Causes flickering/reordering on every refresh
+11. **Column alignment with variable-width data** - Required careful format string tuning
 
 ## Key Insights
 
@@ -305,6 +458,28 @@ Less is more. A clean dashboard with 4 colors is infinitely more usable than a r
 ### Side Effects in Read Operations
 Status checking endpoints should be truly read-only. The fc-agent's auto-start-on-any-request behavior caused the dashboard to inadvertently restart stopped microVMs. Always separate "check status" from "ensure running".
 
+### Multi-Instance Management
+When managing multiple instances of anything (VMs, processes, connections), use:
+- Unique IDs generated server-side (timestamp + counter works well)
+- Optional user-friendly names with collision detection
+- A registry (map) protected by mutex for concurrent access
+- Per-instance resources (sockets, pipes) with unique paths
+
+### TUI List Design
+For terminal UI lists with selection:
+- Sort data before rendering to prevent visual jumping
+- Track selection by index, not by ID (simpler bounds checking)
+- Support vim-style navigation (j/k) - users expect it
+- Toggle-able details prevent information overload
+- Use scroll indicators (▲▼) when list exceeds visible area
+
+### Resource Monitoring
+For process resource monitoring:
+- Prefer OS tools (`ps`, `top`) over manual `/proc` parsing
+- The OS already handles complex calculations (CPU %, memory)
+- Shell out to `ps -p PID -o %cpu=,rss=` - simple and reliable
+- Accept slight overhead for reliability and maintainability
+
 ## Architecture Evolution
 
 ```
@@ -321,28 +496,33 @@ Final Architecture:
 
 | File | Changes | Reason |
 |------|---------|--------|
-| `internal/agent/agent.go` | 6+ revisions | Context bug, console streaming, log suppression |
+| `internal/agent/agent.go` | 10+ revisions | Context bug, console streaming, log suppression, multi-VM support, resource monitoring |
 | `internal/cli/setup.go` | 5+ revisions | Binary transfer, resource config |
-| `internal/cli/run.go` | 4+ revisions | Console connection, auto-stop previous |
-| `internal/cli/dashboard.go` | 5+ revisions | TUI design iterations, resource monitoring |
-| `test/e2e/cli_test.go` | 3+ revisions | Test reliability |
+| `internal/cli/run.go` | 6+ revisions | Console connection, auto-stop previous, --name flag, new API |
+| `internal/cli/microvm.go` | 5+ revisions | list command, --name flags, --all flag, name resolution |
+| `internal/cli/dashboard.go` | 8+ revisions | TUI design iterations, resource monitoring, multi-VM list, j/k nav, details toggle |
+| `test/e2e/cli_test.go` | 4+ revisions | Test reliability, multi-VM tests |
 
 ## Metrics
 
 - **Unit Tests:** 22 passing
-- **E2E Tests:** 20 passing
-- **Lines of Go Code:** ~3500
+- **E2E Tests:** 20 passing (+ 2 full workflow tests)
+- **Lines of Go Code:** ~4500
 - **Development Time:** Multiple sessions over several days
 - **Major Pivots:** 1 (Code-Hex/vz → Tart)
-- **Dashboard Iterations:** 3 (over-designed → simplified → polished)
+- **Dashboard Iterations:** 4 (over-designed → simplified → polished → multi-VM)
+- **Agent API Versions:** 2 (single-VM → multi-VM with backward compat)
 
 ## Future Improvements
 
 1. **Networking** - Add tap device support for microVM networking
 2. **Snapshots** - Test and document snapshot functionality
-3. **Multiple microVMs** - Support running multiple microVMs simultaneously
+3. ~~**Multiple microVMs** - Support running multiple microVMs simultaneously~~ ✅ Done
 4. **Resource limits** - Better memory and CPU management
 5. **Vsock** - Consider vsock instead of HTTP for lower latency
+6. **Rootfs templates** - Pre-built rootfs images for common use cases
+7. **Config files** - YAML/JSON config for microVM definitions
+8. **Batch operations** - Start/stop multiple VMs by pattern
 
 ## References
 
