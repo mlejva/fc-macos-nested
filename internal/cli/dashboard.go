@@ -14,58 +14,69 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Clean, readable color palette (brighter for dark terminals)
+// Minimal color palette - inspired by modern terminal UIs
 var (
-	primaryColor   = lipgloss.Color("#ff8c42") // Orange for branding
-	successColor   = lipgloss.Color("#2ecc71") // Green for running
-	errorColor     = lipgloss.Color("#e74c3c") // Red for stopped
-	mutedColor     = lipgloss.Color("#b0b0b0") // Light gray for labels
-	textColor      = lipgloss.Color("#ffffff") // White for values
-	dimColor       = lipgloss.Color("#888888") // Medium gray for borders/help
-	accentColor    = lipgloss.Color("#3498db") // Blue accent
-	barEmptyColor  = lipgloss.Color("#555555") // Medium dark for empty bar
+	mintGreen  = lipgloss.Color("#5eead4")
+	dimGreen   = lipgloss.Color("#2dd4bf")
+	lightGray  = lipgloss.Color("#a1a1aa")
+	dimGray    = lipgloss.Color("#52525b")
+	white      = lipgloss.Color("#fafafa")
+	red        = lipgloss.Color("#f87171")
+	darkBg     = lipgloss.Color("#18181b")
 )
 
 // Styles
 var (
+	// Title style - uppercase, mint green
 	titleStyle = lipgloss.NewStyle().
+			Foreground(mintGreen).
 			Bold(true).
-			Foreground(primaryColor).
 			Padding(0, 1)
 
+	// Section header - uppercase, dimmer
+	headerStyle = lipgloss.NewStyle().
+			Foreground(lightGray).
+			Bold(true)
+
+	// Box with mint green border
 	boxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(dimColor).
-			Padding(0, 1)
+			BorderForeground(dimGray).
+			Padding(1, 2)
 
 	activeBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(successColor).
-			Padding(0, 1)
+			BorderForeground(mintGreen).
+			Padding(1, 2)
 
-	headerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(accentColor)
-
+	// Label style - dim
 	labelStyle = lipgloss.NewStyle().
-			Foreground(mutedColor)
+			Foreground(dimGray)
 
+	// Value style - white
 	valueStyle = lipgloss.NewStyle().
-			Foreground(textColor)
+			Foreground(white)
 
-	runningStyle = lipgloss.NewStyle().
-			Foreground(successColor).
-			Bold(true)
+	// Status styles
+	statusOK = lipgloss.NewStyle().
+			Foreground(mintGreen)
 
-	stoppedStyle = lipgloss.NewStyle().
-			Foreground(errorColor)
+	statusErr = lipgloss.NewStyle().
+			Foreground(red)
 
-	helpStyle = lipgloss.NewStyle().
-			Foreground(dimColor)
+	// Bracket style for [LABELS]
+	bracketStyle = lipgloss.NewStyle().
+			Foreground(dimGray)
+
+	bracketTextStyle = lipgloss.NewStyle().
+				Foreground(lightGray)
+
+	// Footer
+	footerStyle = lipgloss.NewStyle().
+			Foreground(dimGray)
 
 	keyStyle = lipgloss.NewStyle().
-			Foreground(accentColor).
-			Bold(true)
+			Foreground(mintGreen)
 )
 
 // Status data structures
@@ -75,8 +86,8 @@ type vmStatus struct {
 	IP          string
 	CPUs        int
 	MemoryMB    int
-	MemoryUsed  int  // in MB
-	MemoryTotal int  // in MB
+	MemoryUsed  int
+	MemoryTotal int
 	CPULoad     float64
 }
 
@@ -93,7 +104,6 @@ type agentStatus struct {
 	PID                int
 }
 
-// Dashboard model
 type dashboardModel struct {
 	linuxVM    vmStatus
 	microVM    microVMStatus
@@ -107,7 +117,6 @@ type dashboardModel struct {
 	quitting   bool
 }
 
-// Messages
 type tickMsg time.Time
 type statusUpdateMsg struct {
 	linuxVM vmStatus
@@ -115,18 +124,15 @@ type statusUpdateMsg struct {
 	agent   agentStatus
 	err     error
 }
+type actionResultMsg struct {
+	action string
+	err    error
+}
 
 func newDashboardCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dashboard",
 		Short: "Show live dashboard of VM and microVM status",
-		Long: `Display a live dashboard showing:
-- Linux VM status (running, IP, resources)
-- MicroVM status (running, vCPUs, memory)
-- Resource consumption with visual bars
-- Auto-refreshes every 2 seconds`,
-		Example: `  # Show live dashboard
-  fc-macos dashboard`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDashboard(cmd.Context())
 		},
@@ -152,17 +158,9 @@ func runDashboard(ctx context.Context) error {
 
 func (m dashboardModel) Init() tea.Cmd {
 	return tea.Batch(
-		m.fetchStatus,
-		tea.Every(2*time.Second, func(t time.Time) tea.Msg {
-			return tickMsg(t)
-		}),
+		func() tea.Msg { return m.fetchStatus() },
+		tea.Every(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 	)
-}
-
-// Action result messages
-type actionResultMsg struct {
-	action string
-	err    error
 }
 
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -173,17 +171,12 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "r":
-			// Force refresh
-			return m, func() tea.Msg {
-				return m.fetchStatus()
-			}
+			return m, func() tea.Msg { return m.fetchStatus() }
 		case "s":
-			// Stop microVM
 			if m.agent.FirecrackerRunning {
 				return m, m.stopMicroVM
 			}
 		case "S":
-			// Stop Linux VM
 			if m.linuxVM.Running {
 				return m, m.stopLinuxVM
 			}
@@ -197,9 +190,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, tea.Batch(
 			func() tea.Msg { return m.fetchStatus() },
-			tea.Every(2*time.Second, func(t time.Time) tea.Msg {
-				return tickMsg(t)
-			}),
+			tea.Every(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }),
 		)
 
 	case statusUpdateMsg:
@@ -212,10 +203,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionResultMsg:
 		m.err = msg.err
-		// Refresh status after action
-		return m, func() tea.Msg {
-			return m.fetchStatus()
-		}
+		return m, func() tea.Msg { return m.fetchStatus() }
 	}
 
 	return m, nil
@@ -228,103 +216,89 @@ func (m dashboardModel) View() string {
 
 	var b strings.Builder
 
-	// Title
-	title := titleStyle.Render("🔥 fc-macos")
-	b.WriteString(title)
+	// Header
+	b.WriteString("\n")
+	b.WriteString(titleStyle.Render("FC-MACOS"))
+	b.WriteString("  ")
+	b.WriteString(labelStyle.Render("FIRECRACKER ON MACOS"))
 	b.WriteString("\n\n")
 
-	// Calculate available width
+	// Calculate widths
 	availWidth := m.width
-	if availWidth < 40 {
-		availWidth = 80 // default
+	if availWidth < 60 {
+		availWidth = 80
 	}
 
-	// Responsive layout
-	if availWidth >= 80 {
-		// Wide layout: boxes side by side
-		boxWidth := (availWidth - 4) / 2
-		if boxWidth > 38 {
-			boxWidth = 38
-		}
+	boxWidth := (availWidth - 6) / 2
+	if boxWidth > 40 {
+		boxWidth = 40
+	}
 
-		vmBox := m.renderLinuxVMBox(boxWidth)
+	// Layout
+	if availWidth >= 85 {
+		// Side by side
+		vmBox := m.renderVMBox(boxWidth)
 		agentBox := m.renderAgentBox(boxWidth)
-		row := lipgloss.JoinHorizontal(lipgloss.Top, vmBox, " ", agentBox)
+		row := lipgloss.JoinHorizontal(lipgloss.Top, vmBox, "  ", agentBox)
 		b.WriteString(row)
-		b.WriteString("\n")
-
-		microVMBox := m.renderMicroVMBox(boxWidth*2 + 1)
-		b.WriteString(microVMBox)
+		b.WriteString("\n\n")
+		b.WriteString(m.renderMicroVMBox(boxWidth*2 + 2))
 	} else {
-		// Narrow layout: stack vertically
-		boxWidth := availWidth - 2
-		if boxWidth < 30 {
-			boxWidth = 30
-		}
-
-		b.WriteString(m.renderLinuxVMBox(boxWidth))
+		// Stacked
+		b.WriteString(m.renderVMBox(availWidth - 4))
 		b.WriteString("\n")
-		b.WriteString(m.renderAgentBox(boxWidth))
+		b.WriteString(m.renderAgentBox(availWidth - 4))
 		b.WriteString("\n")
-		b.WriteString(m.renderMicroVMBox(boxWidth))
+		b.WriteString(m.renderMicroVMBox(availWidth - 4))
 	}
 
 	// Footer
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 	b.WriteString(m.renderFooter())
 
 	return b.String()
 }
 
-func (m dashboardModel) renderLinuxVMBox(width int) string {
+func (m dashboardModel) renderVMBox(width int) string {
 	var lines []string
 
-	lines = append(lines, headerStyle.Render("Linux VM"))
+	// Header with decorative corners
+	lines = append(lines, headerStyle.Render("LINUX VM"))
 	lines = append(lines, "")
 
 	if m.linuxVM.Running {
-		lines = append(lines, fmt.Sprintf("%s %s",
-			labelStyle.Render("Status:"),
-			runningStyle.Render("● Running")))
-		lines = append(lines, fmt.Sprintf("%s %s",
-			labelStyle.Render("Name:  "),
+		lines = append(lines, fmt.Sprintf("  %s  %s",
+			statusOK.Render("✓"),
+			valueStyle.Render("RUNNING")))
+		lines = append(lines, "")
+		lines = append(lines, fmt.Sprintf("  %s  %s",
+			labelStyle.Render("NAME"),
 			valueStyle.Render(m.linuxVM.Name)))
-		lines = append(lines, fmt.Sprintf("%s %s",
-			labelStyle.Render("IP:    "),
+		lines = append(lines, fmt.Sprintf("  %s    %s",
+			labelStyle.Render("IP"),
 			valueStyle.Render(m.linuxVM.IP)))
 		lines = append(lines, "")
 
-		// Resource bars
-		barWidth := width - 18
-		if barWidth < 10 {
-			barWidth = 10
+		// Resource meters
+		if m.linuxVM.MemoryTotal > 0 {
+			memPct := m.linuxVM.MemoryUsed * 100 / m.linuxVM.MemoryTotal
+			lines = append(lines, m.renderMeter("MEM", memPct,
+				fmt.Sprintf("%dM / %dM", m.linuxVM.MemoryUsed, m.linuxVM.MemoryTotal), width-8))
 		}
-		if barWidth > 25 {
-			barWidth = 25
-		}
-
-		// CPU bar
 		if m.linuxVM.CPUs > 0 {
 			cpuPct := int(m.linuxVM.CPULoad / float64(m.linuxVM.CPUs) * 100)
 			if cpuPct > 100 {
 				cpuPct = 100
 			}
-			lines = append(lines, m.renderBarWithLabel("CPU", cpuPct, barWidth,
-				fmt.Sprintf("%.1f/%d", m.linuxVM.CPULoad, m.linuxVM.CPUs)))
-		}
-
-		// Memory bar
-		if m.linuxVM.MemoryTotal > 0 {
-			memPct := m.linuxVM.MemoryUsed * 100 / m.linuxVM.MemoryTotal
-			lines = append(lines, m.renderBarWithLabel("Mem", memPct, barWidth,
-				fmt.Sprintf("%d/%dM", m.linuxVM.MemoryUsed, m.linuxVM.MemoryTotal)))
+			lines = append(lines, m.renderMeter("CPU", cpuPct,
+				fmt.Sprintf("%.1f / %d", m.linuxVM.CPULoad, m.linuxVM.CPUs), width-8))
 		}
 	} else {
-		lines = append(lines, fmt.Sprintf("%s %s",
-			labelStyle.Render("Status:"),
-			stoppedStyle.Render("● Stopped")))
+		lines = append(lines, fmt.Sprintf("  %s  %s",
+			statusErr.Render("✗"),
+			labelStyle.Render("STOPPED")))
 		lines = append(lines, "")
-		lines = append(lines, helpStyle.Render("Run 'fc-macos setup'"))
+		lines = append(lines, labelStyle.Render("  run 'fc-macos setup' to start"))
 	}
 
 	content := strings.Join(lines, "\n")
@@ -338,34 +312,35 @@ func (m dashboardModel) renderLinuxVMBox(width int) string {
 func (m dashboardModel) renderAgentBox(width int) string {
 	var lines []string
 
-	lines = append(lines, headerStyle.Render("fc-agent"))
+	lines = append(lines, headerStyle.Render("FC-AGENT"))
 	lines = append(lines, "")
 
 	if m.agent.Available {
-		lines = append(lines, fmt.Sprintf("%s %s",
-			labelStyle.Render("Status:"),
-			runningStyle.Render("● Online")))
+		lines = append(lines, fmt.Sprintf("  %s  %s",
+			statusOK.Render("✓"),
+			valueStyle.Render("ONLINE")))
+		lines = append(lines, "")
 
 		if m.agent.FirecrackerRunning {
-			lines = append(lines, fmt.Sprintf("%s %s",
-				labelStyle.Render("Firecracker:"),
-				runningStyle.Render("Running")))
+			lines = append(lines, fmt.Sprintf("  %s  %s",
+				statusOK.Render("✓"),
+				bracketTextStyle.Render("FIRECRACKER")))
 			if m.agent.PID > 0 {
-				lines = append(lines, fmt.Sprintf("%s %s",
-					labelStyle.Render("PID:"),
+				lines = append(lines, fmt.Sprintf("  %s  %s",
+					labelStyle.Render("PID"),
 					valueStyle.Render(fmt.Sprintf("%d", m.agent.PID))))
 			}
 		} else {
-			lines = append(lines, fmt.Sprintf("%s %s",
-				labelStyle.Render("Firecracker:"),
-				stoppedStyle.Render("Stopped")))
+			lines = append(lines, fmt.Sprintf("  %s  %s",
+				labelStyle.Render("○"),
+				labelStyle.Render("FIRECRACKER")))
 		}
 	} else {
-		lines = append(lines, fmt.Sprintf("%s %s",
-			labelStyle.Render("Status:"),
-			stoppedStyle.Render("● Offline")))
+		lines = append(lines, fmt.Sprintf("  %s  %s",
+			statusErr.Render("✗"),
+			labelStyle.Render("OFFLINE")))
 		lines = append(lines, "")
-		lines = append(lines, helpStyle.Render("Agent not responding"))
+		lines = append(lines, labelStyle.Render("  agent not responding"))
 	}
 
 	content := strings.Join(lines, "\n")
@@ -379,106 +354,106 @@ func (m dashboardModel) renderAgentBox(width int) string {
 func (m dashboardModel) renderMicroVMBox(width int) string {
 	var lines []string
 
-	lines = append(lines, headerStyle.Render("Firecracker MicroVM"))
+	lines = append(lines, headerStyle.Render("MICROVM"))
 	lines = append(lines, "")
 
 	if !m.agent.FirecrackerRunning {
-		lines = append(lines, stoppedStyle.Render("● Not Running"))
+		lines = append(lines, fmt.Sprintf("  %s  %s",
+			labelStyle.Render("○"),
+			labelStyle.Render("NOT RUNNING")))
 		lines = append(lines, "")
-		lines = append(lines, helpStyle.Render("Run 'fc-macos run' to start"))
+		lines = append(lines, labelStyle.Render("  run 'fc-macos run' to start"))
 
 		return boxStyle.Width(width).Render(strings.Join(lines, "\n"))
 	}
 
-	lines = append(lines, runningStyle.Render("● Running"))
+	lines = append(lines, fmt.Sprintf("  %s  %s",
+		statusOK.Render("✓"),
+		valueStyle.Render("RUNNING")))
 	lines = append(lines, "")
 
-	// Resource bars - adjust bar width to fit
-	barWidth := width - 20
-	if barWidth < 15 {
-		barWidth = 15
-	}
-	if barWidth > 40 {
-		barWidth = 40
-	}
+	// Resources in bracket style
+	vcpuLabel := fmt.Sprintf("[ VCPUS: %d ]", m.microVM.VCPUs)
+	memLabel := fmt.Sprintf("[ MEMORY: %d MiB ]", m.microVM.MemoryMiB)
 
-	lines = append(lines, m.renderBar("vCPUs ", m.microVM.VCPUs, 8, barWidth))
-	lines = append(lines, m.renderBar("Memory", m.microVM.MemoryMiB, 4096, barWidth))
+	lines = append(lines, fmt.Sprintf("  %s  %s",
+		bracketStyle.Render(vcpuLabel),
+		bracketStyle.Render(memLabel)))
 	lines = append(lines, "")
 
-	lines = append(lines, fmt.Sprintf("%s %s    %s %s",
-		labelStyle.Render("vCPUs:"),
-		valueStyle.Render(fmt.Sprintf("%d", m.microVM.VCPUs)),
-		labelStyle.Render("Memory:"),
-		valueStyle.Render(fmt.Sprintf("%d MiB", m.microVM.MemoryMiB))))
+	// Resource bars
+	barWidth := width - 16
+	if barWidth < 20 {
+		barWidth = 20
+	}
+	if barWidth > 50 {
+		barWidth = 50
+	}
+
+	vcpuPct := m.microVM.VCPUs * 100 / 8
+	memPct := m.microVM.MemoryMiB * 100 / 4096
+
+	lines = append(lines, m.renderMeter("VCPU", vcpuPct, fmt.Sprintf("%d/8", m.microVM.VCPUs), barWidth))
+	lines = append(lines, m.renderMeter("MEM", memPct, fmt.Sprintf("%d/4096", m.microVM.MemoryMiB), barWidth))
 
 	return activeBoxStyle.Width(width).Render(strings.Join(lines, "\n"))
 }
 
-func (m dashboardModel) renderBar(label string, used, max, barWidth int) string {
-	percentage := float64(used) / float64(max)
-	if percentage > 1 {
-		percentage = 1
-	}
-	filled := int(percentage * float64(barWidth))
-
-	// Simple two-color bar
-	barFull := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("█", filled))
-	barEmpty := lipgloss.NewStyle().Foreground(barEmptyColor).Render(strings.Repeat("░", barWidth-filled))
-
-	pct := int(percentage * 100)
-	pctStr := fmt.Sprintf("%3d%%", pct)
-
-	return fmt.Sprintf("%s %s%s %s",
-		labelStyle.Width(7).Render(label),
-		barFull, barEmpty,
-		valueStyle.Render(pctStr))
-}
-
-func (m dashboardModel) renderBarWithLabel(label string, pct, barWidth int, suffix string) string {
+func (m dashboardModel) renderMeter(label string, pct int, suffix string, width int) string {
 	if pct > 100 {
 		pct = 100
 	}
 	if pct < 0 {
 		pct = 0
 	}
+
+	barWidth := width - len(label) - len(suffix) - 6
+	if barWidth < 10 {
+		barWidth = 10
+	}
+
 	filled := pct * barWidth / 100
+	empty := barWidth - filled
 
-	barFull := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("█", filled))
-	barEmpty := lipgloss.NewStyle().Foreground(barEmptyColor).Render(strings.Repeat("░", barWidth-filled))
+	// Use block characters for a cleaner look
+	filledBar := strings.Repeat("█", filled)
+	emptyBar := strings.Repeat("░", empty)
 
-	return fmt.Sprintf("%s %s%s %s",
+	barStyle := lipgloss.NewStyle().Foreground(dimGreen)
+	emptyStyle := lipgloss.NewStyle().Foreground(dimGray)
+
+	return fmt.Sprintf("  %s %s%s %s",
 		labelStyle.Width(4).Render(label),
-		barFull, barEmpty,
-		valueStyle.Render(suffix))
+		barStyle.Render(filledBar),
+		emptyStyle.Render(emptyBar),
+		labelStyle.Render(suffix))
 }
 
 func (m dashboardModel) renderFooter() string {
 	var parts []string
 
-	// Update time
+	// Timestamp
 	if !m.lastUpdate.IsZero() {
-		parts = append(parts, helpStyle.Render(fmt.Sprintf("Updated %s", m.lastUpdate.Format("15:04:05"))))
+		parts = append(parts, footerStyle.Render(m.lastUpdate.Format("15:04:05")))
 	}
 
+	// Error
 	if m.err != nil {
-		errStyle := lipgloss.NewStyle().Foreground(errorColor)
-		parts = append(parts, errStyle.Render(fmt.Sprintf("Error: %v", m.err)))
+		parts = append(parts, statusErr.Render(fmt.Sprintf("ERR: %v", m.err)))
 	}
 
-	// Help - show available actions
-	var actions []string
-	actions = append(actions, fmt.Sprintf("%s refresh", keyStyle.Render("r")))
-
+	// Commands
+	var cmds []string
+	cmds = append(cmds, fmt.Sprintf("%s refresh", keyStyle.Render("r")))
 	if m.agent.FirecrackerRunning {
-		actions = append(actions, fmt.Sprintf("%s stop microVM", keyStyle.Render("s")))
+		cmds = append(cmds, fmt.Sprintf("%s stop microvm", keyStyle.Render("s")))
 	}
 	if m.linuxVM.Running {
-		actions = append(actions, fmt.Sprintf("%s stop VM", keyStyle.Render("S")))
+		cmds = append(cmds, fmt.Sprintf("%s stop vm", keyStyle.Render("S")))
 	}
-	actions = append(actions, fmt.Sprintf("%s quit", keyStyle.Render("q")))
+	cmds = append(cmds, fmt.Sprintf("%s quit", keyStyle.Render("q")))
 
-	parts = append(parts, strings.Join(actions, "  "))
+	parts = append(parts, footerStyle.Render(strings.Join(cmds, "  ")))
 
 	return strings.Join(parts, "  │  ")
 }
@@ -488,15 +463,10 @@ func (m dashboardModel) fetchStatus() tea.Msg {
 	defer cancel()
 
 	result := statusUpdateMsg{}
-
-	// Check Linux VM status
 	result.linuxVM = m.checkLinuxVM(ctx)
 
-	// If VM is running, check agent and microVM
 	if result.linuxVM.Running && result.linuxVM.IP != "" {
 		result.agent = m.checkAgent(ctx, result.linuxVM.IP)
-		// Only check microVM config if Firecracker is actually running
-		// Otherwise querying /machine-config would auto-start Firecracker!
 		if result.agent.Available && result.agent.FirecrackerRunning {
 			result.microVM = m.checkMicroVM(ctx, result.linuxVM.IP)
 		}
@@ -506,9 +476,7 @@ func (m dashboardModel) fetchStatus() tea.Msg {
 }
 
 func (m dashboardModel) checkLinuxVM(ctx context.Context) vmStatus {
-	status := vmStatus{
-		Name: m.vmName,
-	}
+	status := vmStatus{Name: m.vmName}
 
 	listCmd := exec.CommandContext(ctx, m.tartPath, "list")
 	output, err := listCmd.Output()
@@ -530,25 +498,17 @@ func (m dashboardModel) checkLinuxVM(ctx context.Context) vmStatus {
 	}
 
 	if status.Running {
-		// Get IP
 		ipCmd := exec.CommandContext(ctx, m.tartPath, "ip", m.vmName)
 		if ipOut, err := ipCmd.Output(); err == nil {
 			status.IP = strings.TrimSpace(string(ipOut))
 		}
 
-		// Get actual resource usage via tart exec
-		// Memory: free -m | awk '/^Mem:/ {print $2,$3}'
 		memCmd := exec.CommandContext(ctx, m.tartPath, "exec", m.vmName, "sh", "-c",
 			"free -m | awk '/^Mem:/ {print $2,$3}'")
 		if memOut, err := memCmd.Output(); err == nil {
-			var total, used int
-			if _, err := fmt.Sscanf(strings.TrimSpace(string(memOut)), "%d %d", &total, &used); err == nil {
-				status.MemoryTotal = total
-				status.MemoryUsed = used
-			}
+			fmt.Sscanf(strings.TrimSpace(string(memOut)), "%d %d", &status.MemoryTotal, &status.MemoryUsed)
 		}
 
-		// CPU load: cat /proc/loadavg (1 min average)
 		loadCmd := exec.CommandContext(ctx, m.tartPath, "exec", m.vmName, "sh", "-c",
 			"cat /proc/loadavg | awk '{print $1}'")
 		if loadOut, err := loadCmd.Output(); err == nil {
@@ -561,7 +521,6 @@ func (m dashboardModel) checkLinuxVM(ctx context.Context) vmStatus {
 
 func (m dashboardModel) checkAgent(ctx context.Context, vmIP string) agentStatus {
 	status := agentStatus{}
-
 	client := &http.Client{Timeout: 2 * time.Second}
 	agentURL := fmt.Sprintf("http://%s:8080", vmIP)
 
@@ -595,7 +554,6 @@ func (m dashboardModel) checkAgent(ctx context.Context, vmIP string) agentStatus
 
 func (m dashboardModel) checkMicroVM(ctx context.Context, vmIP string) microVMStatus {
 	status := microVMStatus{}
-
 	client := &http.Client{Timeout: 2 * time.Second}
 	agentURL := fmt.Sprintf("http://%s:8080", vmIP)
 
@@ -631,13 +589,7 @@ func (m dashboardModel) stopMicroVM() tea.Msg {
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	agentURL := fmt.Sprintf("http://%s:8080", m.linuxVM.IP)
-
-	req, err := http.NewRequest("POST", agentURL+"/agent/stop", nil)
-	if err != nil {
-		return actionResultMsg{action: "stop-microvm", err: err}
-	}
-
+	req, _ := http.NewRequest("POST", fmt.Sprintf("http://%s:8080/agent/stop", m.linuxVM.IP), nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		return actionResultMsg{action: "stop-microvm", err: err}
@@ -645,10 +597,9 @@ func (m dashboardModel) stopMicroVM() tea.Msg {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return actionResultMsg{action: "stop-microvm", err: fmt.Errorf("failed with status %d", resp.StatusCode)}
+		return actionResultMsg{action: "stop-microvm", err: fmt.Errorf("status %d", resp.StatusCode)}
 	}
-
-	return actionResultMsg{action: "stop-microvm", err: nil}
+	return actionResultMsg{action: "stop-microvm"}
 }
 
 func (m dashboardModel) stopLinuxVM() tea.Msg {
@@ -659,6 +610,5 @@ func (m dashboardModel) stopLinuxVM() tea.Msg {
 	if err := cmd.Run(); err != nil {
 		return actionResultMsg{action: "stop-vm", err: err}
 	}
-
-	return actionResultMsg{action: "stop-vm", err: nil}
+	return actionResultMsg{action: "stop-vm"}
 }
