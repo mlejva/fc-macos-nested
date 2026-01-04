@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -97,6 +98,24 @@ func runMicroVM(ctx context.Context, vcpus, memoryMiB int, kernel, rootfs, bootA
 			return fmt.Errorf("fc-agent not responding at %s", agentURL)
 		}
 		time.Sleep(time.Second)
+	}
+
+	// Check if Firecracker is already running and stop it
+	resp, err := client.Get(agentURL + "/agent/status")
+	if err == nil {
+		defer resp.Body.Close()
+		var status map[string]interface{}
+		if json.NewDecoder(resp.Body).Decode(&status) == nil {
+			if running, ok := status["firecracker_running"].(bool); ok && running {
+				logrus.Info("Stopping existing Firecracker instance...")
+				req, _ := http.NewRequestWithContext(ctx, "POST", agentURL+"/agent/stop", nil)
+				if stopResp, err := client.Do(req); err == nil {
+					stopResp.Body.Close()
+					// Wait a moment for cleanup
+					time.Sleep(500 * time.Millisecond)
+				}
+			}
+		}
 	}
 
 	// Configure boot source
