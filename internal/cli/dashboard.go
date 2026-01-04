@@ -259,7 +259,7 @@ func (m dashboardModel) View() string {
 	return b.String()
 }
 
-func (m dashboardModel) renderVMBox(width int, height int) string {
+func (m dashboardModel) renderVMBox(width int, minLines int) string {
 	var lines []string
 
 	lines = append(lines, headerStyle.Render("LINUX VM"))
@@ -300,18 +300,20 @@ func (m dashboardModel) renderVMBox(width int, height int) string {
 		lines = append(lines, labelStyle.Render("  run 'fc-macos setup' to start"))
 	}
 
+	// Pad to minimum lines
+	for len(lines) < minLines {
+		lines = append(lines, "")
+	}
+
 	content := strings.Join(lines, "\n")
 	style := boxStyle
 	if m.linuxVM.Running {
 		style = activeBoxStyle
 	}
-	if height > 0 {
-		style = style.Height(height)
-	}
 	return style.Width(width).Render(content)
 }
 
-func (m dashboardModel) renderAgentBox(width int, height int) string {
+func (m dashboardModel) renderAgentBox(width int, minLines int) string {
 	var lines []string
 
 	lines = append(lines, headerStyle.Render("FC-AGENT"))
@@ -345,13 +347,15 @@ func (m dashboardModel) renderAgentBox(width int, height int) string {
 		lines = append(lines, labelStyle.Render("  agent not responding"))
 	}
 
+	// Pad to minimum lines
+	for len(lines) < minLines {
+		lines = append(lines, "")
+	}
+
 	content := strings.Join(lines, "\n")
 	style := boxStyle
 	if m.agent.Available {
 		style = activeBoxStyle
-	}
-	if height > 0 {
-		style = style.Height(height)
 	}
 	return style.Width(width).Render(content)
 }
