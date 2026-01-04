@@ -81,12 +81,63 @@ The setup process:
 - Downloads a Linux kernel for microVMs
 - Creates an Alpine rootfs with interactive shell
 
-### 4. Run a MicroVM
+### 4. Create a Shell Rootfs
+
+The default Ubuntu rootfs doesn't have a working serial console. Create a minimal Alpine rootfs with an interactive shell:
+
+```bash
+# SSH into the Linux VM
+./build/fc-macos vm shell
+
+# Inside the Linux VM, run these commands:
+
+# Create directories
+sudo mkdir -p /var/lib/firecracker/rootfs
+
+# Create a 50MB ext4 image
+sudo dd if=/dev/zero of=/var/lib/firecracker/rootfs/alpine-shell.ext4 bs=1M count=50
+sudo mkfs.ext4 /var/lib/firecracker/rootfs/alpine-shell.ext4
+
+# Mount and populate
+sudo mkdir -p /mnt/rootfs
+sudo mount /var/lib/firecracker/rootfs/alpine-shell.ext4 /mnt/rootfs
+
+# Download Alpine minirootfs
+curl -L https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/aarch64/alpine-minirootfs-3.19.0-aarch64.tar.gz | sudo tar xz -C /mnt/rootfs
+
+# Create the init script (this is the key part!)
+sudo tee /mnt/rootfs/init << 'EOF'
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+hostname firecracker
+echo "Welcome to Firecracker microVM!"
+exec /sbin/getty -n -l /bin/sh 115200 ttyS0 vt100
+EOF
+sudo chmod +x /mnt/rootfs/init
+
+# Unmount
+sudo umount /mnt/rootfs
+
+# Exit the Linux VM
+exit
+```
+
+### 5. Run a MicroVM
 
 Start a Firecracker microVM with an interactive shell:
 
 ```bash
 ./build/fc-macos run
+```
+
+Or run with your custom rootfs and boot args:
+
+```bash
+./build/fc-macos run \
+    --rootfs /var/lib/firecracker/rootfs/alpine-shell.ext4 \
+    --boot-args "console=ttyS0 reboot=k panic=1 pci=off init=/init"
 ```
 
 This will:
@@ -97,7 +148,7 @@ This will:
 
 Press `Ctrl+]` to disconnect from the console.
 
-### 5. Run in Background
+### 6. Run in Background
 
 To run the microVM in background mode:
 
@@ -129,6 +180,7 @@ To run the microVM in background mode:
 | `fc-macos run` | Start microVM with interactive console |
 | `fc-macos run --background` | Start microVM in background |
 | `fc-macos run --vcpus 4 --memory 512` | Custom vCPUs and memory |
+| `fc-macos run --rootfs PATH --boot-args "..."` | Custom rootfs and boot args |
 
 ### MicroVM Management
 
