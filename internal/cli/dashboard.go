@@ -236,18 +236,18 @@ func (m dashboardModel) View() string {
 
 	// Layout
 	if availWidth >= 85 {
-		// Side by side
-		vmBox := m.renderVMBox(boxWidth)
-		agentBox := m.renderAgentBox(boxWidth)
+		// Side by side - use same height for both boxes
+		vmBox := m.renderVMBox(boxWidth, 10)
+		agentBox := m.renderAgentBox(boxWidth, 10)
 		row := lipgloss.JoinHorizontal(lipgloss.Top, vmBox, "  ", agentBox)
 		b.WriteString(row)
 		b.WriteString("\n\n")
-		b.WriteString(m.renderMicroVMBox(boxWidth*2 + 2))
+		b.WriteString(m.renderMicroVMBox(boxWidth*2 + 4))
 	} else {
 		// Stacked
-		b.WriteString(m.renderVMBox(availWidth - 4))
+		b.WriteString(m.renderVMBox(availWidth-4, 0))
 		b.WriteString("\n")
-		b.WriteString(m.renderAgentBox(availWidth - 4))
+		b.WriteString(m.renderAgentBox(availWidth-4, 0))
 		b.WriteString("\n")
 		b.WriteString(m.renderMicroVMBox(availWidth - 4))
 	}
@@ -259,10 +259,9 @@ func (m dashboardModel) View() string {
 	return b.String()
 }
 
-func (m dashboardModel) renderVMBox(width int) string {
+func (m dashboardModel) renderVMBox(width int, height int) string {
 	var lines []string
 
-	// Header with decorative corners
 	lines = append(lines, headerStyle.Render("LINUX VM"))
 	lines = append(lines, "")
 
@@ -306,10 +305,13 @@ func (m dashboardModel) renderVMBox(width int) string {
 	if m.linuxVM.Running {
 		style = activeBoxStyle
 	}
+	if height > 0 {
+		style = style.Height(height)
+	}
 	return style.Width(width).Render(content)
 }
 
-func (m dashboardModel) renderAgentBox(width int) string {
+func (m dashboardModel) renderAgentBox(width int, height int) string {
 	var lines []string
 
 	lines = append(lines, headerStyle.Render("FC-AGENT"))
@@ -347,6 +349,9 @@ func (m dashboardModel) renderAgentBox(width int) string {
 	style := boxStyle
 	if m.agent.Available {
 		style = activeBoxStyle
+	}
+	if height > 0 {
+		style = style.Height(height)
 	}
 	return style.Width(width).Render(content)
 }
