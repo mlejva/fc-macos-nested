@@ -1,0 +1,23 @@
+# Build outputs
+build/
+*.exe
+*.app
+
+# Go
+*.test
+*.out
+vendor/
+
+# macOS
+.DS_Store
+*.dylib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test artifacts
+*.log
+coverage.out
