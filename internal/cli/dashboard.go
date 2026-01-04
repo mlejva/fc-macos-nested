@@ -15,66 +15,109 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Styles
+// Gradient colors
 var (
+	// Fire gradient for the title
+	fireGradient = []string{"#ff0000", "#ff4500", "#ff6b00", "#ff8c00", "#ffa500"}
+
+	// Cyan/blue gradient for Linux VM
+	vmGradient = []string{"#00d4ff", "#00b4d8", "#0096c7", "#0077b6", "#023e8a"}
+
+	// Purple/pink gradient for agent
+	agentGradient = []string{"#f72585", "#b5179e", "#7209b7", "#560bad", "#480ca8"}
+
+	// Green gradient for running status
+	greenGradient = []string{"#00ff87", "#00e676", "#00c853", "#00a843", "#008837"}
+
+	// Orange/yellow gradient for microVM
+	microVMGradient = []string{"#ffbe0b", "#fb5607", "#ff006e", "#8338ec", "#3a86ff"}
+)
+
+// Styles with glow effects
+var (
+	// Title with fire effect
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("205")).
+			Foreground(lipgloss.Color("#ff6b00")).
+			Background(lipgloss.Color("#1a0a00")).
+			Padding(0, 2).
 			MarginBottom(1)
 
-	boxStyle = lipgloss.NewStyle().
+	// Glow container for title
+	titleGlowStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
+			BorderForeground(lipgloss.Color("#ff4500")).
+			Padding(0, 1).
+			MarginBottom(1)
+
+	// Box styles with gradients
+	vmBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#00d4ff")).
 			Padding(1, 2)
 
-	activeBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("40")).
-			Padding(1, 2)
-
-	inactiveBoxStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("240")).
+	vmBoxActiveStyle = lipgloss.NewStyle().
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(lipgloss.Color("#00ff87")).
 				Padding(1, 2)
 
+	agentBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#b5179e")).
+			Padding(1, 2)
+
+	agentBoxActiveStyle = lipgloss.NewStyle().
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(lipgloss.Color("#00ff87")).
+				Padding(1, 2)
+
+	microVMBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#ff6b00")).
+			Padding(1, 2)
+
+	microVMBoxActiveStyle = lipgloss.NewStyle().
+				Border(lipgloss.ThickBorder()).
+				BorderForeground(lipgloss.Color("#00ff87")).
+				Padding(1, 2)
+
+	// Labels and values
 	labelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
+			Foreground(lipgloss.Color("#888888"))
 
 	valueStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("255")).
+			Foreground(lipgloss.Color("#ffffff")).
 			Bold(true)
 
+	// Status indicators with glow
 	runningStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("40")).
+			Foreground(lipgloss.Color("#00ff87")).
 			Bold(true)
 
 	stoppedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
+			Foreground(lipgloss.Color("#ff4757")).
 			Bold(true)
 
-	warningStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214"))
-
-	headerStyle = lipgloss.NewStyle().
+	// Headers with gradients
+	vmHeaderStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("99")).
-			MarginBottom(1)
+			Foreground(lipgloss.Color("#00d4ff"))
 
+	agentHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#f72585"))
+
+	microVMHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#ffbe0b"))
+
+	// Help text
 	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
+			Foreground(lipgloss.Color("#555555")).
 			MarginTop(1)
 
-	barEmptyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
-
-	barFullStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("40"))
-
-	barHighStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214"))
-
-	barCriticalStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("196"))
+	// Sparkle characters for effects
+	sparkles = []string{"✦", "✧", "⋆", "·"}
 )
 
 // Status data structures
@@ -88,32 +131,32 @@ type vmStatus struct {
 }
 
 type microVMStatus struct {
-	Running    bool
-	VCPUs      int
-	MemoryMiB  int
-	PID        int
-	SocketPath string
+	Running   bool
+	VCPUs     int
+	MemoryMiB int
+	PID       int
 }
 
 type agentStatus struct {
-	Available         bool
+	Available          bool
 	FirecrackerRunning bool
-	PID               int
+	PID                int
 }
 
 // Dashboard model
 type dashboardModel struct {
-	spinner      spinner.Model
-	linuxVM      vmStatus
-	microVM      microVMStatus
-	agent        agentStatus
-	lastUpdate   time.Time
-	err          error
-	width        int
-	height       int
-	tartPath     string
-	vmName       string
-	quitting     bool
+	spinner    spinner.Model
+	linuxVM    vmStatus
+	microVM    microVMStatus
+	agent      agentStatus
+	lastUpdate time.Time
+	err        error
+	width      int
+	height     int
+	tartPath   string
+	vmName     string
+	quitting   bool
+	tick       int
 }
 
 // Messages
@@ -124,6 +167,7 @@ type statusUpdateMsg struct {
 	agent   agentStatus
 	err     error
 }
+type animateMsg time.Time
 
 func newDashboardCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -151,7 +195,7 @@ func runDashboard(ctx context.Context) error {
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b00"))
 
 	m := dashboardModel{
 		spinner:  s,
@@ -170,6 +214,9 @@ func (m dashboardModel) Init() tea.Cmd {
 		m.fetchStatus,
 		tea.Every(2*time.Second, func(t time.Time) tea.Msg {
 			return tickMsg(t)
+		}),
+		tea.Every(150*time.Millisecond, func(t time.Time) tea.Msg {
+			return animateMsg(t)
 		}),
 	)
 }
@@ -198,6 +245,12 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}),
 		)
 
+	case animateMsg:
+		m.tick++
+		return m, tea.Every(150*time.Millisecond, func(t time.Time) tea.Msg {
+			return animateMsg(t)
+		})
+
 	case statusUpdateMsg:
 		m.linuxVM = msg.linuxVM
 		m.microVM = msg.microVM
@@ -222,8 +275,8 @@ func (m dashboardModel) View() string {
 
 	var b strings.Builder
 
-	// Title
-	title := titleStyle.Render("🔥 fc-macos Dashboard")
+	// Animated fire title
+	title := m.renderFireTitle()
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
@@ -250,161 +303,281 @@ func (m dashboardModel) View() string {
 		b.WriteString(microVMBox)
 	}
 
-	// Footer
+	// Footer with animation
 	b.WriteString("\n")
-	updateInfo := fmt.Sprintf("Last update: %s", m.lastUpdate.Format("15:04:05"))
-	if m.err != nil {
-		updateInfo += " " + warningStyle.Render(fmt.Sprintf("(error: %v)", m.err))
-	}
-	b.WriteString(helpStyle.Render(updateInfo))
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("Press 'r' to refresh • 'q' to quit"))
+	b.WriteString(m.renderFooter())
 
 	return b.String()
+}
+
+func (m dashboardModel) renderFireTitle() string {
+	title := "fc-macos Dashboard"
+	var result strings.Builder
+
+	// Add animated sparkles
+	sparkle := sparkles[m.tick%len(sparkles)]
+	sparkleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(fireGradient[m.tick%len(fireGradient)]))
+
+	result.WriteString(sparkleStyle.Render(sparkle))
+	result.WriteString(" ")
+
+	// Render each character with gradient
+	for i, char := range title {
+		colorIdx := (i + m.tick) % len(fireGradient)
+		charStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color(fireGradient[colorIdx]))
+		result.WriteString(charStyle.Render(string(char)))
+	}
+
+	result.WriteString(" ")
+	result.WriteString(sparkleStyle.Render(sparkle))
+
+	// Wrap in glow box
+	return titleGlowStyle.Render("🔥 " + result.String() + " 🔥")
 }
 
 func (m dashboardModel) renderLinuxVMBox() string {
 	var content strings.Builder
 
-	content.WriteString(headerStyle.Render("🐧 Linux VM"))
+	// Header with gradient
+	header := m.renderGradientText("🐧 Linux VM", vmGradient)
+	content.WriteString(header)
 	content.WriteString("\n\n")
 
-	// Status
-	status := stoppedStyle.Render("● Stopped")
+	// Status with animated indicator
 	if m.linuxVM.Running {
-		status = runningStyle.Render("● Running")
+		indicator := m.renderPulsingDot(greenGradient)
+		content.WriteString(fmt.Sprintf("%s %s %s\n",
+			labelStyle.Render("Status:"),
+			indicator,
+			runningStyle.Render("Running")))
+	} else {
+		content.WriteString(fmt.Sprintf("%s %s %s\n",
+			labelStyle.Render("Status:"),
+			stoppedStyle.Render("●"),
+			stoppedStyle.Render("Stopped")))
 	}
-	content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Status:"), status))
 
 	// Details
 	if m.linuxVM.Running {
-		content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Name:  "), valueStyle.Render(m.linuxVM.Name)))
-		content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("IP:    "), valueStyle.Render(m.linuxVM.IP)))
-		content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("CPUs:  "), valueStyle.Render(m.linuxVM.CPUs)))
-		content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Memory:"), valueStyle.Render(m.linuxVM.Memory)))
+		content.WriteString(fmt.Sprintf("%s %s\n",
+			labelStyle.Render("Name:  "),
+			valueStyle.Render(m.linuxVM.Name)))
+		content.WriteString(fmt.Sprintf("%s %s\n",
+			labelStyle.Render("IP:    "),
+			m.renderGradientText(m.linuxVM.IP, vmGradient)))
+		content.WriteString(fmt.Sprintf("%s %s\n",
+			labelStyle.Render("CPUs:  "),
+			valueStyle.Render(m.linuxVM.CPUs)))
+		content.WriteString(fmt.Sprintf("%s %s\n",
+			labelStyle.Render("Memory:"),
+			valueStyle.Render(m.linuxVM.Memory)))
 	} else {
-		content.WriteString(labelStyle.Render("\nRun 'fc-macos setup' to start"))
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Italic(true)
+		content.WriteString("\n")
+		content.WriteString(dimStyle.Render("Run 'fc-macos setup' to start"))
 	}
 
-	style := inactiveBoxStyle
+	style := vmBoxStyle
 	if m.linuxVM.Running {
-		style = activeBoxStyle
+		style = vmBoxActiveStyle
 	}
-	return style.Width(35).Render(content.String())
+	return style.Width(36).Render(content.String())
 }
 
 func (m dashboardModel) renderAgentBox() string {
 	var content strings.Builder
 
-	content.WriteString(headerStyle.Render("🤖 fc-agent"))
+	// Header with gradient
+	header := m.renderGradientText("🤖 fc-agent", agentGradient)
+	content.WriteString(header)
 	content.WriteString("\n\n")
 
 	// Status
-	status := stoppedStyle.Render("● Offline")
 	if m.agent.Available {
-		status = runningStyle.Render("● Online")
+		indicator := m.renderPulsingDot(greenGradient)
+		content.WriteString(fmt.Sprintf("%s %s %s\n",
+			labelStyle.Render("Status:"),
+			indicator,
+			runningStyle.Render("Online")))
+	} else {
+		content.WriteString(fmt.Sprintf("%s %s %s\n",
+			labelStyle.Render("Status:"),
+			stoppedStyle.Render("●"),
+			stoppedStyle.Render("Offline")))
 	}
-	content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Status:"), status))
 
 	if m.agent.Available {
-		fcStatus := stoppedStyle.Render("Stopped")
 		if m.agent.FirecrackerRunning {
-			fcStatus = runningStyle.Render("Running")
+			fcIndicator := m.renderPulsingDot(greenGradient)
+			content.WriteString(fmt.Sprintf("%s %s %s\n",
+				labelStyle.Render("Firecracker:"),
+				fcIndicator,
+				runningStyle.Render("Running")))
+		} else {
+			content.WriteString(fmt.Sprintf("%s %s %s\n",
+				labelStyle.Render("Firecracker:"),
+				stoppedStyle.Render("●"),
+				stoppedStyle.Render("Stopped")))
 		}
-		content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Firecracker:"), fcStatus))
 		if m.agent.PID > 0 {
-			content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("FC PID:"), valueStyle.Render(fmt.Sprintf("%d", m.agent.PID))))
+			content.WriteString(fmt.Sprintf("%s %s\n",
+				labelStyle.Render("FC PID:"),
+				valueStyle.Render(fmt.Sprintf("%d", m.agent.PID))))
 		}
 	} else {
-		content.WriteString(labelStyle.Render("\nAgent not responding"))
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Italic(true)
+		content.WriteString("\n")
+		content.WriteString(dimStyle.Render("Agent not responding"))
 	}
 
-	style := inactiveBoxStyle
+	style := agentBoxStyle
 	if m.agent.Available {
-		style = activeBoxStyle
+		style = agentBoxActiveStyle
 	}
-	return style.Width(35).Render(content.String())
+	return style.Width(36).Render(content.String())
 }
 
 func (m dashboardModel) renderMicroVMBox() string {
 	var content strings.Builder
 
-	content.WriteString(headerStyle.Render("🔥 Firecracker MicroVM"))
+	// Header with gradient
+	header := m.renderGradientText("🔥 Firecracker MicroVM", microVMGradient)
+	content.WriteString(header)
 	content.WriteString("\n\n")
 
 	if !m.agent.FirecrackerRunning {
-		content.WriteString(stoppedStyle.Render("● Not Running"))
-		content.WriteString("\n\n")
-		content.WriteString(labelStyle.Render("Run 'fc-macos run' to start a microVM"))
-		return inactiveBoxStyle.Width(74).Render(content.String())
+		content.WriteString(fmt.Sprintf("%s %s\n",
+			stoppedStyle.Render("●"),
+			stoppedStyle.Render("Not Running")))
+		content.WriteString("\n")
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Italic(true)
+		content.WriteString(dimStyle.Render("Run 'fc-macos run' to start a microVM"))
+		return microVMBoxStyle.Width(76).Render(content.String())
 	}
 
-	content.WriteString(runningStyle.Render("● Running"))
-	content.WriteString("\n\n")
-
-	// Resource bars
-	content.WriteString(m.renderResourceBar("vCPUs", m.microVM.VCPUs, 8))
+	// Running status with pulsing indicator
+	indicator := m.renderPulsingDot(greenGradient)
+	content.WriteString(fmt.Sprintf("%s %s\n", indicator, runningStyle.Render("Running")))
 	content.WriteString("\n")
-	content.WriteString(m.renderMemoryBar("Memory", m.microVM.MemoryMiB, 4096))
+
+	// Fancy resource bars
+	content.WriteString(m.renderFancyBar("vCPUs ", m.microVM.VCPUs, 8, vmGradient))
+	content.WriteString("\n")
+	content.WriteString(m.renderFancyBar("Memory", m.microVM.MemoryMiB, 4096, microVMGradient))
 	content.WriteString("\n\n")
 
-	// Details
-	content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("vCPUs: "), valueStyle.Render(fmt.Sprintf("%d", m.microVM.VCPUs))))
-	content.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Memory:"), valueStyle.Render(fmt.Sprintf("%d MiB", m.microVM.MemoryMiB))))
+	// Details with styled values
+	content.WriteString(fmt.Sprintf("%s %s\n",
+		labelStyle.Render("vCPUs: "),
+		m.renderGradientText(fmt.Sprintf("%d cores", m.microVM.VCPUs), vmGradient)))
+	content.WriteString(fmt.Sprintf("%s %s\n",
+		labelStyle.Render("Memory:"),
+		m.renderGradientText(fmt.Sprintf("%d MiB", m.microVM.MemoryMiB), microVMGradient)))
 
-	return activeBoxStyle.Width(74).Render(content.String())
+	return microVMBoxActiveStyle.Width(76).Render(content.String())
 }
 
-func (m dashboardModel) renderResourceBar(label string, used, max int) string {
-	barWidth := 40
+func (m dashboardModel) renderGradientText(text string, gradient []string) string {
+	var result strings.Builder
+	for i, char := range text {
+		colorIdx := i % len(gradient)
+		charStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color(gradient[colorIdx]))
+		result.WriteString(charStyle.Render(string(char)))
+	}
+	return result.String()
+}
+
+func (m dashboardModel) renderPulsingDot(gradient []string) string {
+	colorIdx := m.tick % len(gradient)
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(gradient[colorIdx])).
+		Bold(true)
+	return style.Render("●")
+}
+
+func (m dashboardModel) renderFancyBar(label string, used, max int, gradient []string) string {
+	barWidth := 45
 	percentage := float64(used) / float64(max)
 	if percentage > 1 {
 		percentage = 1
 	}
 	filled := int(percentage * float64(barWidth))
 
-	var barStyle lipgloss.Style
-	if percentage < 0.6 {
-		barStyle = barFullStyle
-	} else if percentage < 0.85 {
-		barStyle = barHighStyle
-	} else {
-		barStyle = barCriticalStyle
+	// Build gradient bar
+	var bar strings.Builder
+	for i := 0; i < barWidth; i++ {
+		if i < filled {
+			// Gradient fill
+			colorIdx := (i * len(gradient)) / barWidth
+			if colorIdx >= len(gradient) {
+				colorIdx = len(gradient) - 1
+			}
+			style := lipgloss.NewStyle().Foreground(lipgloss.Color(gradient[colorIdx]))
+			bar.WriteString(style.Render("█"))
+		} else {
+			// Empty with dim color
+			dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
+			bar.WriteString(dimStyle.Render("░"))
+		}
 	}
 
-	bar := barStyle.Render(strings.Repeat("█", filled)) +
-		barEmptyStyle.Render(strings.Repeat("░", barWidth-filled))
+	// Percentage with color based on usage
+	var pctStyle lipgloss.Style
+	pct := int(percentage * 100)
+	if pct < 50 {
+		pctStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff87"))
+	} else if pct < 80 {
+		pctStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffbe0b"))
+	} else {
+		pctStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4757"))
+	}
 
-	return fmt.Sprintf("%s [%s] %d/%d",
-		labelStyle.Width(8).Render(label),
-		bar,
-		used, max)
+	return fmt.Sprintf("%s %s %s",
+		labelStyle.Width(7).Render(label),
+		bar.String(),
+		pctStyle.Render(fmt.Sprintf("%3d%%", pct)))
 }
 
-func (m dashboardModel) renderMemoryBar(label string, usedMiB, maxMiB int) string {
-	barWidth := 40
-	percentage := float64(usedMiB) / float64(maxMiB)
-	if percentage > 1 {
-		percentage = 1
+func (m dashboardModel) renderFooter() string {
+	var footer strings.Builder
+
+	// Animated update indicator
+	updateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	sparkle := sparkles[m.tick%len(sparkles)]
+	sparkleColor := lipgloss.NewStyle().Foreground(lipgloss.Color(fireGradient[m.tick%len(fireGradient)]))
+
+	footer.WriteString(updateStyle.Render(fmt.Sprintf("Last update: %s ", m.lastUpdate.Format("15:04:05"))))
+	footer.WriteString(sparkleColor.Render(sparkle))
+
+	if m.err != nil {
+		errStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff4757"))
+		footer.WriteString(errStyle.Render(fmt.Sprintf(" (error: %v)", m.err)))
 	}
-	filled := int(percentage * float64(barWidth))
 
-	var barStyle lipgloss.Style
-	if percentage < 0.6 {
-		barStyle = barFullStyle
-	} else if percentage < 0.85 {
-		barStyle = barHighStyle
-	} else {
-		barStyle = barCriticalStyle
-	}
+	footer.WriteString("\n")
 
-	bar := barStyle.Render(strings.Repeat("█", filled)) +
-		barEmptyStyle.Render(strings.Repeat("░", barWidth-filled))
+	// Help with gradient
+	help := "Press "
+	rKey := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00d4ff")).
+		Bold(true).
+		Render("r")
+	qKey := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#ff4757")).
+		Bold(true).
+		Render("q")
 
-	return fmt.Sprintf("%s [%s] %d/%d MiB",
-		labelStyle.Width(8).Render(label),
-		bar,
-		usedMiB, maxMiB)
+	footer.WriteString(helpStyle.Render(help))
+	footer.WriteString(rKey)
+	footer.WriteString(helpStyle.Render(" to refresh • "))
+	footer.WriteString(qKey)
+	footer.WriteString(helpStyle.Render(" to quit"))
+
+	return footer.String()
 }
 
 func (m dashboardModel) fetchStatus() tea.Msg {
