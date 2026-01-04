@@ -301,7 +301,16 @@ func (m dashboardModel) View() string {
 	b.WriteString("\n\n")
 	b.WriteString(m.renderFooter())
 
-	return b.String()
+	// Wrap in full-height container
+	content := b.String()
+	if m.height > 0 {
+		fullHeightStyle := lipgloss.NewStyle().
+			Width(m.width).
+			Height(m.height)
+		content = fullHeightStyle.Render(content)
+	}
+
+	return content
 }
 
 func (m dashboardModel) renderVMBox(width int, minLines int) string {
@@ -428,7 +437,8 @@ func (m dashboardModel) renderMicroVMBox(width int) string {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("  run 'fc-macos run' to start"))
 
-		return boxStyle.Width(width).Render(strings.Join(lines, "\n"))
+		noBorderStyle := lipgloss.NewStyle().Padding(1, 2)
+		return noBorderStyle.Width(width).Render(strings.Join(lines, "\n"))
 	}
 
 	// Column headers (6 spaces = 2 selector + 1 expand + 1 space + 1 status icon + 1 space)
@@ -535,13 +545,9 @@ func (m dashboardModel) renderMicroVMBox(width int) string {
 		lines = append(lines, labelStyle.Render("  ▼ more below"))
 	}
 
-	// Determine box style
-	style := boxStyle
-	if len(m.microVMs) > 0 {
-		style = activeBoxStyle
-	}
-
-	return style.Width(width).Render(strings.Join(lines, "\n"))
+	// No border for microVMs section - just padding
+	noBorderStyle := lipgloss.NewStyle().Padding(1, 2)
+	return noBorderStyle.Width(width).Render(strings.Join(lines, "\n"))
 }
 
 func (m dashboardModel) renderMeter(label string, pct int, suffix string, width int) string {
