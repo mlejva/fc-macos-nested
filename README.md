@@ -1,15 +1,8 @@
-# fc-macos
-
 A CLI tool that runs Firecracker microVMs on macOS using nested virtualization.
 
-## What We've Built
+## What is this
 
 This project enables running Firecracker microVMs on Apple Silicon Macs (M3+) through nested virtualization. The key achievement is a complete CLI that:
-
-- Sets up a Linux VM with KVM support via Tart
-- Installs and manages Firecracker inside the Linux VM
-- Provides interactive shell access to both the Linux VM and the microVM
-- Exposes the full Firecracker API through CLI commands
 
 ## Architecture
 
@@ -41,7 +34,7 @@ This project enables running Firecracker microVMs on Apple Silicon Macs (M3+) th
 
 - Apple Silicon M3 or later (nested virtualization support)
 - macOS 15.0 (Sequoia) or later
-- Tart installed (see below)
+- [Tart](https://tart.run/) installed (see below)
 
 ## Quick Start
 
@@ -278,27 +271,6 @@ FC-MACOS   FIRECRACKER ON MACOS
 | `fc-macos metrics get` | Get metrics |
 | `fc-macos balloon set --amount MiB` | Set balloon target |
 
-## Verifying You're Inside Firecracker
-
-Once connected to the microVM shell, you can verify you're inside Firecracker:
-
-```bash
-# Check hostname (set to "firecracker")
-hostname
-
-# View kernel boot arguments
-cat /proc/cmdline
-
-# Check available memory (matches --memory flag)
-free -m
-
-# View kernel info
-uname -a
-
-# Check CPU info (matches --vcpus flag)
-cat /proc/cpuinfo | grep processor | wc -l
-```
-
 ## Testing
 
 ### Run Unit Tests
@@ -326,110 +298,3 @@ The full workflow test starts a microVM and verifies it boots correctly:
 ```bash
 FC_E2E_FULL=1 go test -v -tags=e2e ./test/e2e/... -run TestFullWorkflow
 ```
-
-## How It Works
-
-### Why Tart?
-
-macOS Tahoe requires a provisioning profile with virtualization capabilities for any binary that uses `Virtualization.framework` directly. Tart is properly signed and notarized by Cirrus Labs, so it works without additional setup.
-
-### fc-agent
-
-The `fc-agent` runs inside the Linux VM and:
-- Listens on port 8080 for HTTP requests
-- Manages the Firecracker process lifecycle
-- Proxies Firecracker API requests to the Unix socket
-- Provides console streaming via HTTP connection hijacking
-
-### Console Access
-
-The microVM shell works through:
-1. Firecracker's serial console (connected to stdin/stdout)
-2. fc-agent streams console I/O over HTTP
-3. fc-macos CLI connects and puts terminal in raw mode
-
-## Troubleshooting
-
-### Tart not found
-
-Make sure Tart is installed in one of these locations:
-- `~/Applications/tart.app/Contents/MacOS/tart`
-- `/Applications/tart.app/Contents/MacOS/tart`
-- `/usr/local/bin/tart`
-
-### KVM not available
-
-Ensure you're using:
-- M3 chip or later
-- macOS 15+ (Sequoia or Tahoe)
-- Tart 2.20.0+ with `--nested` flag
-
-### MicroVM not responding
-
-Check fc-agent status:
-```bash
-./build/fc-macos microvm status
-./build/fc-macos microvm logs
-```
-
-### Setup fails
-
-Try forcing a fresh setup:
-```bash
-./build/fc-macos setup --force
-```
-
-### Linux VM shell for debugging
-
-Access the Linux VM directly to debug issues:
-```bash
-./build/fc-macos vm shell
-
-# Inside Linux VM, check:
-ls /usr/local/bin/firecracker
-ls /var/lib/firecracker/
-systemctl status fc-agent
-```
-
-## Project Structure
-
-```
-fc-macos-nested/
-├── cmd/
-│   ├── fc-macos/main.go          # CLI entry point
-│   └── fc-agent/main.go          # Guest agent entry point
-├── internal/
-│   ├── cli/                      # Cobra CLI commands
-│   │   ├── root.go               # Root command
-│   │   ├── setup.go              # Setup command (VM + Firecracker)
-│   │   ├── run.go                # Run command (start microVM)
-│   │   ├── microvm.go            # MicroVM management
-│   │   ├── vm.go                 # Linux VM management
-│   │   └── ...                   # Other Firecracker API commands
-│   └── agent/                    # Guest agent
-│       └── agent.go              # HTTP server + Firecracker proxy
-├── test/
-│   ├── unit/                     # Unit tests
-│   └── e2e/                      # End-to-end tests
-├── Makefile
-└── README.md
-```
-
-## Verified Features
-
-- ✅ Tart 2.30.1+ works on macOS Tahoe
-- ✅ Nested virtualization (`--nested` flag)
-- ✅ KVM available inside Linux VM (`/dev/kvm`)
-- ✅ Firecracker runs inside Linux VM
-- ✅ **Multiple microVMs running simultaneously**
-- ✅ Interactive shell to microVM via serial console
-- ✅ Interactive shell to Linux VM via tart exec
-- ✅ Full Firecracker API access via CLI
-- ✅ **Live dashboard with j/k navigation and details toggle**
-- ✅ **Real-time CPU and memory monitoring per microVM**
-- ✅ 22 unit tests passing
-- ✅ 20 E2E tests passing
-
-## License
-
-MIT
