@@ -70,11 +70,14 @@ var (
 
 // Status data structures
 type vmStatus struct {
-	Running bool
-	Name    string
-	IP      string
-	CPUs    string
-	Memory  string
+	Running     bool
+	Name        string
+	IP          string
+	CPUs        int
+	MemoryMB    int
+	MemoryUsed  int  // in MB
+	MemoryTotal int  // in MB
+	CPULoad     float64
 }
 
 type microVMStatus struct {
@@ -289,12 +292,33 @@ func (m dashboardModel) renderLinuxVMBox(width int) string {
 		lines = append(lines, fmt.Sprintf("%s %s",
 			labelStyle.Render("IP:    "),
 			valueStyle.Render(m.linuxVM.IP)))
-		lines = append(lines, fmt.Sprintf("%s %s",
-			labelStyle.Render("CPUs:  "),
-			valueStyle.Render(m.linuxVM.CPUs)))
-		lines = append(lines, fmt.Sprintf("%s %s",
-			labelStyle.Render("Memory:"),
-			valueStyle.Render(m.linuxVM.Memory)))
+		lines = append(lines, "")
+
+		// Resource bars
+		barWidth := width - 18
+		if barWidth < 10 {
+			barWidth = 10
+		}
+		if barWidth > 25 {
+			barWidth = 25
+		}
+
+		// CPU bar
+		if m.linuxVM.CPUs > 0 {
+			cpuPct := int(m.linuxVM.CPULoad / float64(m.linuxVM.CPUs) * 100)
+			if cpuPct > 100 {
+				cpuPct = 100
+			}
+			lines = append(lines, m.renderBarWithLabel("CPU", cpuPct, barWidth,
+				fmt.Sprintf("%.1f/%d", m.linuxVM.CPULoad, m.linuxVM.CPUs)))
+		}
+
+		// Memory bar
+		if m.linuxVM.MemoryTotal > 0 {
+			memPct := m.linuxVM.MemoryUsed * 100 / m.linuxVM.MemoryTotal
+			lines = append(lines, m.renderBarWithLabel("Mem", memPct, barWidth,
+				fmt.Sprintf("%d/%dM", m.linuxVM.MemoryUsed, m.linuxVM.MemoryTotal)))
+		}
 	} else {
 		lines = append(lines, fmt.Sprintf("%s %s",
 			labelStyle.Render("Status:"),
@@ -411,6 +435,24 @@ func (m dashboardModel) renderBar(label string, used, max, barWidth int) string 
 		valueStyle.Render(pctStr))
 }
 
+func (m dashboardModel) renderBarWithLabel(label string, pct, barWidth int, suffix string) string {
+	if pct > 100 {
+		pct = 100
+	}
+	if pct < 0 {
+		pct = 0
+	}
+	filled := pct * barWidth / 100
+
+	barFull := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("█", filled))
+	barEmpty := lipgloss.NewStyle().Foreground(barEmptyColor).Render(strings.Repeat("░", barWidth-filled))
+
+	return fmt.Sprintf("%s %s%s %s",
+		labelStyle.Width(4).Render(label),
+		barFull, barEmpty,
+		valueStyle.Render(suffix))
+}
+
 func (m dashboardModel) renderFooter() string {
 	var parts []string
 
@@ -480,17 +522,37 @@ func (m dashboardModel) checkLinuxVM(ctx context.Context) vmStatus {
 			status.Running = strings.Contains(line, "running")
 			fields := strings.Fields(line)
 			if len(fields) >= 4 {
-				status.CPUs = fields[2]
-				status.Memory = fields[3] + " MB"
+				fmt.Sscanf(fields[2], "%d", &status.CPUs)
+				fmt.Sscanf(fields[3], "%d", &status.MemoryMB)
 			}
 			break
 		}
 	}
 
 	if status.Running {
+		// Get IP
 		ipCmd := exec.CommandContext(ctx, m.tartPath, "ip", m.vmName)
 		if ipOut, err := ipCmd.Output(); err == nil {
 			status.IP = strings.TrimSpace(string(ipOut))
+		}
+
+		// Get actual resource usage via tart exec
+		// Memory: free -m | awk '/^Mem:/ {print $2,$3}'
+		memCmd := exec.CommandContext(ctx, m.tartPath, "exec", m.vmName, "sh", "-c",
+			"free -m | awk '/^Mem:/ {print $2,$3}'")
+		if memOut, err := memCmd.Output(); err == nil {
+			var total, used int
+			if _, err := fmt.Sscanf(strings.TrimSpace(string(memOut)), "%d %d", &total, &used); err == nil {
+				status.MemoryTotal = total
+				status.MemoryUsed = used
+			}
+		}
+
+		// CPU load: cat /proc/loadavg (1 min average)
+		loadCmd := exec.CommandContext(ctx, m.tartPath, "exec", m.vmName, "sh", "-c",
+			"cat /proc/loadavg | awk '{print $1}'")
+		if loadOut, err := loadCmd.Output(); err == nil {
+			fmt.Sscanf(strings.TrimSpace(string(loadOut)), "%f", &status.CPULoad)
 		}
 	}
 
