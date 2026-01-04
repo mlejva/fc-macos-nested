@@ -59,6 +59,7 @@ to provide the full Firecracker API on macOS.`,
 	rootCmd.AddCommand(newMetricsCmd())
 	rootCmd.AddCommand(newBalloonCmd())
 	rootCmd.AddCommand(newVMCmd())
+	rootCmd.AddCommand(newDashboardCmd())
 
 	return rootCmd
 }

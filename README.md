@@ -183,6 +183,12 @@ To run the microVM in background mode:
 | `fc-macos run --vcpus 4 --memory 512` | Custom vCPUs and memory |
 | `fc-macos run --rootfs PATH --boot-args "..."` | Custom rootfs and boot args |
 
+### Dashboard
+
+| Command | Description |
+|---------|-------------|
+| `fc-macos dashboard` | Live dashboard showing VM and microVM status |
+
 ### MicroVM Management
 
 | Command | Description |
