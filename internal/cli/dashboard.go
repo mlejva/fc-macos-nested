@@ -16,13 +16,12 @@ import (
 
 // Minimal color palette - orange accent, bright readable text
 var (
-	orange     = lipgloss.Color("#ff8800")
-	dimOrange  = lipgloss.Color("#cc6600")
-	white      = lipgloss.Color("#ffffff")
-	lightGray  = lipgloss.Color("#e0e0e0") // Bright for readability
-	midGray    = lipgloss.Color("#a0a0a0") // Still readable
-	dimGray    = lipgloss.Color("#606060")
-	red        = lipgloss.Color("#ff6b6b")
+	orange    = lipgloss.Color("#ff8800")
+	white     = lipgloss.Color("#ffffff")
+	lightGray = lipgloss.Color("#f0f0f0") // Very bright
+	midGray   = lipgloss.Color("#cccccc") // Bright labels
+	dimGray   = lipgloss.Color("#888888") // Still visible
+	red       = lipgloss.Color("#ff6b6b")
 )
 
 // Styles
