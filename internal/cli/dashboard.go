@@ -14,69 +14,70 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Minimal color palette - inspired by modern terminal UIs
+// Minimal color palette - orange accent, bright readable text
 var (
-	mintGreen  = lipgloss.Color("#5eead4")
-	dimGreen   = lipgloss.Color("#2dd4bf")
-	lightGray  = lipgloss.Color("#a1a1aa")
-	dimGray    = lipgloss.Color("#52525b")
-	white      = lipgloss.Color("#fafafa")
-	red        = lipgloss.Color("#f87171")
-	darkBg     = lipgloss.Color("#18181b")
+	orange     = lipgloss.Color("#ff8800")
+	dimOrange  = lipgloss.Color("#cc6600")
+	white      = lipgloss.Color("#ffffff")
+	lightGray  = lipgloss.Color("#e0e0e0") // Bright for readability
+	midGray    = lipgloss.Color("#a0a0a0") // Still readable
+	dimGray    = lipgloss.Color("#606060")
+	red        = lipgloss.Color("#ff6b6b")
 )
 
 // Styles
 var (
-	// Title style - uppercase, mint green
+	// Title style - uppercase, orange
 	titleStyle = lipgloss.NewStyle().
-			Foreground(mintGreen).
+			Foreground(orange).
 			Bold(true).
 			Padding(0, 1)
 
-	// Section header - uppercase, dimmer
+	// Section header - uppercase, bright
 	headerStyle = lipgloss.NewStyle().
-			Foreground(lightGray).
+			Foreground(white).
 			Bold(true)
 
-	// Box with mint green border
+	// Box with dim border (inactive)
 	boxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(dimGray).
 			Padding(1, 2)
 
+	// Box with orange border (active)
 	activeBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(mintGreen).
+			BorderForeground(orange).
 			Padding(1, 2)
 
-	// Label style - dim
+	// Label style - readable gray
 	labelStyle = lipgloss.NewStyle().
-			Foreground(dimGray)
+			Foreground(midGray)
 
-	// Value style - white
+	// Value style - white for max readability
 	valueStyle = lipgloss.NewStyle().
 			Foreground(white)
 
 	// Status styles
 	statusOK = lipgloss.NewStyle().
-			Foreground(mintGreen)
+			Foreground(orange)
 
 	statusErr = lipgloss.NewStyle().
 			Foreground(red)
 
 	// Bracket style for [LABELS]
 	bracketStyle = lipgloss.NewStyle().
-			Foreground(dimGray)
+			Foreground(midGray)
 
 	bracketTextStyle = lipgloss.NewStyle().
 				Foreground(lightGray)
 
-	// Footer
+	// Footer - readable
 	footerStyle = lipgloss.NewStyle().
-			Foreground(dimGray)
+			Foreground(lightGray)
 
 	keyStyle = lipgloss.NewStyle().
-			Foreground(mintGreen)
+			Foreground(orange)
 )
 
 // Status data structures
@@ -419,7 +420,7 @@ func (m dashboardModel) renderMeter(label string, pct int, suffix string, width 
 	filledBar := strings.Repeat("█", filled)
 	emptyBar := strings.Repeat("░", empty)
 
-	barStyle := lipgloss.NewStyle().Foreground(dimGreen)
+	barStyle := lipgloss.NewStyle().Foreground(orange)
 	emptyStyle := lipgloss.NewStyle().Foreground(dimGray)
 
 	return fmt.Sprintf("  %s %s%s %s",
