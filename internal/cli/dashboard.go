@@ -14,17 +14,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Clean, readable color palette
+// Clean, readable color palette (brighter for dark terminals)
 var (
-	// Primary colors
-	primaryColor   = lipgloss.Color("#ff6b00") // Orange for branding
-	successColor   = lipgloss.Color("#00d26a") // Green for running
-	errorColor     = lipgloss.Color("#ff4757") // Red for stopped
-	mutedColor     = lipgloss.Color("#6c757d") // Gray for labels
-	textColor      = lipgloss.Color("#f8f9fa") // White for values
-	dimColor       = lipgloss.Color("#495057") // Dim for inactive
-	accentColor    = lipgloss.Color("#00b4d8") // Cyan accent
-	barEmptyColor  = lipgloss.Color("#2d3436") // Dark for empty bar
+	primaryColor   = lipgloss.Color("#ff8c42") // Orange for branding
+	successColor   = lipgloss.Color("#2ecc71") // Green for running
+	errorColor     = lipgloss.Color("#e74c3c") // Red for stopped
+	mutedColor     = lipgloss.Color("#b0b0b0") // Light gray for labels
+	textColor      = lipgloss.Color("#ffffff") // White for values
+	dimColor       = lipgloss.Color("#888888") // Medium gray for borders/help
+	accentColor    = lipgloss.Color("#3498db") // Blue accent
+	barEmptyColor  = lipgloss.Color("#555555") // Medium dark for empty bar
 )
 
 // Styles
