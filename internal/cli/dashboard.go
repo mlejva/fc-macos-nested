@@ -453,7 +453,9 @@ func (m dashboardModel) fetchStatus() tea.Msg {
 	// If VM is running, check agent and microVM
 	if result.linuxVM.Running && result.linuxVM.IP != "" {
 		result.agent = m.checkAgent(ctx, result.linuxVM.IP)
-		if result.agent.Available {
+		// Only check microVM config if Firecracker is actually running
+		// Otherwise querying /machine-config would auto-start Firecracker!
+		if result.agent.Available && result.agent.FirecrackerRunning {
 			result.microVM = m.checkMicroVM(ctx, result.linuxVM.IP)
 		}
 	}
